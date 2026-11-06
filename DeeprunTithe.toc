@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Deeprun Tithe
+## Notes: Tallies a tithe on junk you loot and fills in the payment mail.
+## Author: Snugglelumps
+## Version: 1.0.0
+## SavedVariablesPerCharacter: guild_debt, DeeprunTitheConfig
+
+sha256.lua
+guild_config.lua
+DeeprunTithe.lua
