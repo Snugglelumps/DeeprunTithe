@@ -1,13 +1,12 @@
 -- Deeprun Tithe
 
 -- shared.sha256 comes from sha256.lua
--- shared.tithe_rate, shared.treasurers and shared.secret come from guild_config.lua
+-- shared.tithe_rate, shared.tithes_start_after_level, shared.treasurers and shared.secret come from guild_config.lua
 local addon_name, shared = ...
 
 -- Settings
 local tithe_subject = "Deeprun Tithe"
 local goods_multiplier = 3
-local tithes_start_after_level = 9
 local postage_refund = 30 -- copper. Added to every tithe, so the guild covers the stamp.
 
 local pending_credit = 0
@@ -101,7 +100,7 @@ local function on_loot_message(loot_text)
         return
     end
 
-    if UnitLevel("player") <= tithes_start_after_level then
+    if UnitLevel("player") <= shared.tithes_start_after_level then
         return
     end
 

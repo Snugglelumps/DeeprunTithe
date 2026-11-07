@@ -2,7 +2,7 @@
 -- Reads the guild's settings from a [[base64]] string in Guild Info, so nothing is hard-coded.
 -- Deeprun Tithe and Deeprun Ledger each have a copy of this file, and they must stay identical.
 -- Make the string with /drl hash in Deeprun Ledger.
--- Decoded, it looks like: r=0.05;t=First Treasurer,Second Treasurer;s=<secret bytes>
+-- Decoded, it looks like: r=0.05;l=9;t=First Treasurer,Second Treasurer;s=<secret bytes>
 -- The first treasurer is who tithes get mailed to.
 
 local addon_name, shared = ...
@@ -10,12 +10,16 @@ local addon_name, shared = ...
 -- Saved per character, so an alt in another guild can't pick up this guild's config
 local saved_config_name = addon_name .. "Config"
 
+-- Used until a code says otherwise, and for codes made before l= existed
+local default_start_level = 9
+
 shared.tithe_rate = nil
+shared.tithes_start_after_level = default_start_level
 shared.treasurers = {}
 shared.secret = nil
 
 
--- Returns the rate, the treasurer list and the secret, or nil if it isn't a real config
+-- Returns the rate, the treasurer list, the secret and the start level, or nil if it isn't a real config
 function shared.decodeConfig(encoded_config)
     local decoded_config = C_EncodingUtil.DecodeBase64(encoded_config)
     if decoded_config == nil then
@@ -26,6 +30,7 @@ function shared.decodeConfig(encoded_config)
     local tithe_rate = tonumber(string.match(decoded_config, "^r=([^;]*)"))
     local treasurer_list = string.match(decoded_config, ";t=([^;]+)")
     local secret = string.match(decoded_config, ";s=(.+)$")
+    local tithes_start_after_level = tonumber(string.match(decoded_config, ";l=(%d+)"))
 
     if tithe_rate == nil then
         return nil
@@ -39,13 +44,17 @@ function shared.decodeConfig(encoded_config)
         return nil
     end
 
-    return tithe_rate, treasurer_list, secret
+    if tithes_start_after_level == nil then
+        tithes_start_after_level = default_start_level
+    end
+
+    return tithe_rate, treasurer_list, secret, tithes_start_after_level
 end
 
 
 -- Returns false and changes nothing if the string isn't a real config
 local function useConfig(encoded_config)
-    local tithe_rate, treasurer_list, secret = shared.decodeConfig(encoded_config)
+    local tithe_rate, treasurer_list, secret, tithes_start_after_level = shared.decodeConfig(encoded_config)
 
     if tithe_rate == nil then
         return false
@@ -57,6 +66,7 @@ local function useConfig(encoded_config)
     end
 
     shared.tithe_rate = tithe_rate
+    shared.tithes_start_after_level = tithes_start_after_level
     shared.treasurers = treasurers
     shared.secret = secret
 

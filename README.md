@@ -17,7 +17,7 @@ The guild covers your postage: each tithe you send takes 30 copper off what you'
 
 ## For guilds
 
-The addon has no settings. It reads your guild's rate and treasurers from a code in Guild Info, which looks like this:
+The addon has no settings. It reads your guild's rate, starting level and treasurers from a code in Guild Info, which looks like this:
 
 ```
 [[cj0wLjA1O3Q9...]]
