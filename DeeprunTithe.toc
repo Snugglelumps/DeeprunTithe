@@ -2,7 +2,7 @@
 ## Title: Deeprun Tithe
 ## Notes: Tallies a tithe on junk you loot and fills in the payment mail.
 ## Author: Snugglelumps
-## Version: 1.0.0
+## Version: @project-version@
 ## SavedVariablesPerCharacter: guild_debt, DeeprunTitheConfig
 
 sha256.lua
