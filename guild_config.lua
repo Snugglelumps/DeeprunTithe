@@ -72,6 +72,10 @@ local function readGuildInfo()
 
     local info_text = C_GuildInfo.GetInfoText()
 
+    if info_text == nil then
+        return
+    end
+
     if issecretvalue(info_text) then
         return
     end
