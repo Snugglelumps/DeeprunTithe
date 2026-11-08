@@ -8,6 +8,7 @@ local addon_name, shared = ...
 local tithe_subject = "Deeprun Tithe"
 local goods_multiplier = 3
 local postage_refund = 30 -- copper. Added to every tithe, so the guild covers the stamp.
+local show_debug_text = false
 
 local pending_credit = 0
 local pending_transaction_id = nil
@@ -124,6 +125,49 @@ local function on_loot_message(loot_text)
 
     guild_debt = guild_debt + vendor_price * quantity
 end
+
+
+-- The gray on the cursor, remembered in case it gets deleted
+local gray_on_cursor_value = nil
+
+hooksecurefunc(C_Container, "PickupContainerItem", function(bag, slot)
+    gray_on_cursor_value = nil
+
+    -- The same call puts items down too
+    if not CursorHasItem() then
+        return
+    end
+
+    local info = C_Container.GetContainerItemInfo(bag, slot)
+    if info == nil then
+        return
+    end
+
+    if info.quality ~= Enum.ItemQuality.Poor then
+        return
+    end
+
+    local vendor_price = select(11, C_Item.GetItemInfo(info.itemID))
+    gray_on_cursor_value = vendor_price * info.stackCount
+end)
+
+hooksecurefunc("ClearCursor", function()
+    gray_on_cursor_value = nil
+end)
+
+-- Deleting a gray takes back its debt. It can wipe debt out but never turns into credit,
+-- so grays looted before tithes started can't be deleted for gold.
+hooksecurefunc("DeleteCursorItem", function()
+    if gray_on_cursor_value == nil then
+        return
+    end
+
+    if guild_debt > 0 then
+        guild_debt = math.max(guild_debt - gray_on_cursor_value, 0)
+    end
+
+    gray_on_cursor_value = nil
+end)
 
 
 local function moneyText(copper)
@@ -428,6 +472,28 @@ hooksecurefunc("SendMail", function(recipient, subject, body)
 end)
 
 
+-- Debug: the raw numbers, bottom middle of the screen, refreshed twice a second
+local function create_debug_text()
+    local debug_text = UIParent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    debug_text:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 20)
+
+    C_Timer.NewTicker(0.5, function()
+        if shared.tithe_rate == nil then
+            debug_text:SetText("debt " .. math.floor(guild_debt) .. "c  |  rate not loaded")
+            return
+        end
+
+        debug_text:SetText(
+            "debt " .. math.floor(guild_debt) .. "c"
+            .. "  |  rate " .. shared.tithe_rate
+            .. "  |  owed " .. moneyText(math.max(amountOwed(), 0))
+            .. "  |  credit " .. moneyText(tithe_credit())
+            .. "  |  gray on cursor " .. tostring(gray_on_cursor_value)
+        )
+    end)
+end
+
+
 local tithe_frame = CreateFrame("Frame")
 tithe_frame:RegisterEvent("PLAYER_LOGIN")
 tithe_frame:RegisterEvent("CHAT_MSG_LOOT")
@@ -440,6 +506,10 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
             guild_debt = 0
         end
         create_tithe_bar()
+
+        if show_debug_text then
+            create_debug_text()
+        end
 
     elseif event == "CHAT_MSG_LOOT" then
         on_loot_message(...)

@@ -80,6 +80,11 @@ local function readGuildInfo()
         return
     end
 
+    -- Reading Guild Info is blocked in combat. The next roster update after the fight reads it.
+    if InCombatLockdown() then
+        return
+    end
+
     local info_text = C_GuildInfo.GetInfoText()
 
     if info_text == nil then
@@ -92,6 +97,11 @@ local function readGuildInfo()
 
     local encoded_config = string.match(info_text, "%[%[(.-)%]%]")
     if encoded_config == nil then
+        return
+    end
+
+    -- Same code as last time, so the settings are already in use
+    if encoded_config == _G[saved_config_name] then
         return
     end
 
