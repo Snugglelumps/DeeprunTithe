@@ -25,7 +25,7 @@ local cursor_item_count = 0
 local pending_bank_deposit = nil
 
 local DeeprunDeposit = nil     -- the button on the guild bank
-local mail_button = nil
+local mail_sign = nil
 
 
 ------------------------------------------------------------
@@ -361,11 +361,22 @@ hooksecurefunc("DeleteCursorItem", on_item_deleted)
 -- Buttons
 ------------------------------------------------------------
 
--- The guild bank window only exists once Blizzard_GuildBankUI has loaded
+-- The guild bank window only exists once Blizzard_GuildBankUI has loaded.
+-- Same look as the mail sign, in the gap to the right of the bank's tabs.
 local function create_bank_button()
-    DeeprunDeposit = CreateFrame("Button", nil, GuildBankFrame, "UIPanelButtonTemplate")
-    DeeprunDeposit:SetSize(300, 26)
-    DeeprunDeposit:SetPoint("BOTTOM", GuildBankFrame, "TOP", 0, 4)
+    DeeprunDeposit = CreateFrame("Button", nil, GuildBankFrame)
+    DeeprunDeposit:SetPoint("BOTTOMLEFT", GuildBankFrameTab4, "BOTTOMRIGHT", 4, 4)
+    DeeprunDeposit:SetPoint("TOPRIGHT", GuildBankFrame, "BOTTOMRIGHT", -2, -2)
+    DeeprunDeposit:SetNormalFontObject("GameFontHighlightSmall")
+
+    local background = DeeprunDeposit:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0.05, 0.05, 0.06, 0.97)
+
+    local hover = DeeprunDeposit:CreateTexture(nil, "HIGHLIGHT")
+    hover:SetAllPoints()
+    hover:SetColorTexture(1, 1, 1, 0.08)
+
     DeeprunDeposit:SetScript("OnClick", function()
         deposit_tithe()
     end)
@@ -374,11 +385,19 @@ local function create_bank_button()
 end
 
 
-local function create_mail_button()
-    mail_button = CreateFrame("Button", nil, MailFrame, "UIPanelButtonTemplate")
-    mail_button:SetSize(300, 26)
-    mail_button:SetPoint("BOTTOM", MailFrame, "TOP", 0, 4)
-    mail_button:SetText("Deposit in the Guild Bank")
+-- Where the old pay bar was, beside the mailbox tabs. Just a sign now, tithes go in the guild bank.
+local function create_mail_sign()
+    mail_sign = CreateFrame("Frame", nil, MailFrame)
+    mail_sign:SetPoint("BOTTOMLEFT", MailFrameTab2, "BOTTOMRIGHT", 4, 4)
+    mail_sign:SetPoint("TOPRIGHT", MailFrame, "BOTTOMRIGHT", -2, -2)
+
+    local background = mail_sign:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0.05, 0.05, 0.06, 0.97)
+
+    local text = mail_sign:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetAllPoints()
+    text:SetText("Pay tithes at the guild bank")
 end
 
 
@@ -393,7 +412,7 @@ tithe_frame:RegisterEvent("CHAT_MSG_LOOT")
 tithe_frame:RegisterEvent("CHAT_MSG_ADDON")
 tithe_frame:RegisterEvent("CURSOR_CHANGED")
 tithe_frame:RegisterEvent("GUILDBANKBAGSLOTS_CHANGED")
-tithe_frame:RegisterEvent("GUILDBANKFRAME_CLOSED")
+tithe_frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
 
 tithe_frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -409,10 +428,12 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
             tithe_archive = {}
         end
 
+        print("|TInterface\\MoneyFrame\\UI-GoldIcon:0|t |cffffd100DeeprunTithe|r: All payments must be made to the Guild Bank by EOD")
+
         C_ChatInfo.RegisterAddonMessagePrefix(shared.prefix)
         C_Timer.NewTicker(30, drain_queue)
 
-        create_mail_button()
+        create_mail_sign()
 
         -- Another addon may have loaded the guild bank window already
         if C_AddOns.IsAddOnLoaded("Blizzard_GuildBankUI") then
@@ -442,7 +463,8 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
         check_bank_deposit()
 
     -- A drop that never landed shouldn't pick up someone else's deposit later
-    elseif event == "GUILDBANKFRAME_CLOSED" then
+    -- The bank closing. GUILDBANKFRAME_CLOSED never fires on Forever.
+    elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and ... == Enum.PlayerInteractionType.GuildBanker then
         pending_bank_deposit = nil
     end
 end)

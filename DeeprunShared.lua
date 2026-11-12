@@ -148,14 +148,15 @@ end
 local settings_frame = CreateFrame("Frame")
 settings_frame:RegisterEvent("PLAYER_LOGIN")
 settings_frame:RegisterEvent("GUILD_ROSTER_UPDATE")
-settings_frame:RegisterEvent("GUILDBANKFRAME_OPENED")
+-- Opening any NPC window, like the guild bank. GUILDBANKFRAME_OPENED never fires on Forever.
+settings_frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
 
-settings_frame:SetScript("OnEvent", function(self, event)
+settings_frame:SetScript("OnEvent", function(self, event, interaction_type)
     -- Guild Info arrives with the roster, so these ask for a fresh one
     if event == "PLAYER_LOGIN" then
         C_GuildInfo.GuildRoster()
 
-    elseif event == "GUILDBANKFRAME_OPENED" then
+    elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and interaction_type == Enum.PlayerInteractionType.GuildBanker then
         C_GuildInfo.GuildRoster()
 
     elseif event == "GUILD_ROSTER_UPDATE" then
