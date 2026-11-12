@@ -1,107 +1,40 @@
 -- Deeprun Tithe
 
--- shared.sha256 comes from sha256.lua
--- shared.tithe_rate, shared.tithes_start_after_level, shared.treasurers and shared.secret come from guild_config.lua
+-- The prefix, tithe rate, transaction IDs and messages come from DeeprunShared.lua
 local addon_name, shared = ...
 
 -- Settings
-local tithe_subject = "Deeprun Tithe"
-local goods_multiplier = 3
-local postage_refund = 30 -- copper. Added to every tithe, so the guild covers the stamp.
-local show_debug_text = false
+local tithes_start_after_level = 10
 
-local pending_credit = 0
-local pending_transaction_id = nil
+-- Saved per character (see DeeprunTithe.toc):
+--   guild_debt     full vendor value of junk looted. What you owe is guild_debt * tithe_rate.
+--   tithe_queue    deposits not yet confirmed by a ledger, oldest first
+--   tithe_archive  deposits a ledger has confirmed, kept for exporting later
+-- A queued row: { transactionID = "time|base64", time = ..., gold = ..., item_id = ..., count = ... }
 
--- The bar in the gap beside the mailbox tabs
-local tithe_bar = nil
-local pay_button = nil
-local seconds_since_refresh = 0
-local refresh_every_seconds = 0.2
+local last_rdy_time = 0        -- GetTime() when a ledger last said RDY
+local waiting_for_ack = nil    -- the transactionID sent and not yet ACKed
+local sent_time = 0            -- GetTime() when that row was sent
 
+-- What's on the cursor, remembered when it's picked up,
+-- because by the time DeleteCursorItem's hook runs the item is gone
+local cursor_item_id = nil
+local cursor_item_count = 0
 
--- UnitName gives first name and surname separately. Mail shows them joined by a space.
-local function fullPlayerName()
-    local first_name, surname = UnitName("player")
+-- A bag item dropped on a guild bank slot, waiting for the slot to show it landed
+local pending_bank_deposit = nil
 
-    if surname == nil then
-        return first_name
-    end
-
-    if surname == "" then
-        return first_name
-    end
-
-    return first_name .. " " .. surname
-end
+local DeeprunDeposit = nil     -- the button on the guild bank
+local mail_button = nil
 
 
--- Same function as DeeprunLedger
-local function makeTransactionID(sent_time, player_name)
-    local full_hash = shared.sha256(sent_time .. player_name .. shared.secret)
-    return sent_time .. "-" .. string.sub(full_hash, 1, 10)
-end
+------------------------------------------------------------
+-- Debt
+------------------------------------------------------------
 
-
-local function itemTitheValue(item_id, stack_count, item_quality)
-    local item_class_id = select(12, C_Item.GetItemInfo(item_id))
-    local vendor_price = select(11, C_Item.GetItemInfo(item_id))
-
-    if vendor_price == nil then
-        return 0
-    end
-
-    -- Grays make debt but don't pay it. Vendoring one gives the same gold without the postage.
-    if item_quality == Enum.ItemQuality.Poor then
-        return 0
-    end
-
-    if item_class_id == Enum.ItemClass.Tradegoods then
-        return vendor_price * stack_count * goods_multiplier
-    end
-
-    return 0
-end
-
-
-local function attachedItemsTitheValue()
-    local items_value = 0
-
-    for slot = 1, ATTACHMENTS_MAX_SEND do
-        if HasSendMailItem(slot) then
-            local item_name, item_id, item_texture, stack_count, item_quality = GetSendMailItem(slot)
-            items_value = items_value + itemTitheValue(item_id, stack_count, item_quality)
-        end
-    end
-
-    return items_value
-end
-
-
--- Treasurers don't pay tithes
-local function playerIsTreasurer()
-    for treasurer_number, treasurer in ipairs(shared.treasurers) do
-        if fullPlayerName() == treasurer then
-            return true
-        end
-    end
-
-    return false
-end
-
-
--- Debt is kept at full junk value, so it tracks fine before the rate is known
-local function amountOwed()
-    return math.floor(guild_debt * shared.tithe_rate)
-end
-
--- THE boy
+-- Looting junk adds its vendor value to guild_debt
 local function on_loot_message(loot_text)
-    if playerIsTreasurer() then
-        return
-    end
-
-    if UnitLevel("player") <= shared.tithes_start_after_level then
+    if UnitLevel("player") <= tithes_start_after_level then
         return
     end
 
@@ -127,14 +60,288 @@ local function on_loot_message(loot_text)
 end
 
 
--- The gray on the cursor, remembered in case it gets deleted
-local gray_on_cursor_value = nil
+local function remember_cursor_item()
+    cursor_item_id = nil
+    cursor_item_count = 0
 
-hooksecurefunc(C_Container, "PickupContainerItem", function(bag, slot)
-    gray_on_cursor_value = nil
+    local item_location = C_Cursor.GetCursorItem()
+    if item_location == nil then
+        return
+    end
 
-    -- The same call puts items down too
-    if not CursorHasItem() then
+    if not item_location:IsValid() then
+        return
+    end
+
+    cursor_item_id = C_Item.GetItemID(item_location)
+    cursor_item_count = C_Item.GetStackCount(item_location)
+end
+
+
+-- Deleting junk takes its vendor value back off guild_debt
+local function on_item_deleted()
+    if cursor_item_id == nil then
+        return
+    end
+
+    local item_quality = select(3, C_Item.GetItemInfo(cursor_item_id))
+    if item_quality ~= Enum.ItemQuality.Poor then
+        return
+    end
+
+    local vendor_price = select(11, C_Item.GetItemInfo(cursor_item_id))
+    guild_debt = guild_debt - vendor_price * cursor_item_count
+
+    if guild_debt < 0 then
+        guild_debt = 0
+    end
+
+    cursor_item_id = nil
+end
+
+
+------------------------------------------------------------
+-- Transaction IDs and the queue
+------------------------------------------------------------
+
+-- Makes the row for one deposit and puts it in the queue
+local function record_deposit(gold, item_id, item_count)
+    local deposit_time = GetServerTime()
+
+    table.insert(tithe_queue, {
+        -- Full "First Last" name, the same as the sender the ledger sees
+        transactionID = shared.makeTransactionID(GetUnitName("player", true), deposit_time, gold, item_id, item_count),
+        time = deposit_time,
+        gold = gold,
+        item_id = item_id,
+        count = item_count,
+    })
+end
+
+
+local function record_item_deposit(item_id, item_count)
+    record_deposit(0, item_id, item_count)
+end
+
+
+------------------------------------------------------------
+-- Talking to the ledgers
+------------------------------------------------------------
+
+local function send(message)
+    C_ChatInfo.SendAddonMessage(shared.prefix, message, "GUILD")
+end
+
+
+local function RDY_listen(message)
+    if message == shared.rdyMessage() then
+        last_rdy_time = GetTime()
+    end
+end
+
+
+local function archive(row)
+    table.insert(tithe_archive, row)
+    table.remove(tithe_queue, 1)
+end
+
+
+-- Sends the oldest queued row. One row is in flight at a time.
+local function drain_queue()
+    -- No ledger has said RDY in the last 6 minutes
+    if GetTime() - last_rdy_time > 360 then
+        return
+    end
+
+    if #tithe_queue == 0 then
+        return
+    end
+
+    -- Still waiting on the last row, and it hasn't been long enough to send it again
+    if waiting_for_ack ~= nil and GetTime() - sent_time < 25 then
+        return
+    end
+
+    local row = tithe_queue[1]
+    send(shared.rowMessage(row))
+    waiting_for_ack = row.transactionID
+    sent_time = GetTime()
+end
+
+
+local function row_acked(message)
+    if waiting_for_ack == nil then
+        return
+    end
+
+    if message ~= shared.ackMessage(waiting_for_ack) then
+        return
+    end
+
+    archive(tithe_queue[1])
+    waiting_for_ack = nil
+
+    -- Send the next one right away instead of waiting for the next tick
+    drain_queue()
+end
+
+
+------------------------------------------------------------
+-- Depositing
+------------------------------------------------------------
+
+local function update_bank_button()
+    if DeeprunDeposit == nil then
+        return
+    end
+
+    if shared.tithe_rate == nil then
+        DeeprunDeposit:SetText("Not set up")
+        return
+    end
+
+    local amount_owed = math.floor(guild_debt * shared.tithe_rate)
+
+    if amount_owed <= 0 then
+        DeeprunDeposit:SetText("All paid up")
+        return
+    end
+
+    DeeprunDeposit:SetText("Pay Tithe: " .. GetMoneyString(amount_owed))
+end
+
+
+local function deposit_tithe(confirmed)
+    if shared.tithe_rate == nil then
+        return
+    end
+
+    local deposit = math.floor(guild_debt * shared.tithe_rate)
+
+    if deposit <= 0 then
+        return
+    end
+
+    if GetMoney() < deposit then
+        print("Deeprun Tithe: you don't have enough gold to cover the tithe.")
+        return
+    end
+
+    if confirmed == nil then
+        if deposit > GetMoney() * 0.1 then
+            StaticPopup_Show("DEEPRUN_DEPOSIT_POPUP", GetMoneyString(deposit))
+            return
+        end
+    end
+
+    -- The DepositGuildBankMoney hook below records it and lowers the debt
+    DepositGuildBankMoney(deposit)
+end
+
+
+StaticPopupDialogs["DEEPRUN_DEPOSIT_POPUP"] = {
+    text = "Deposit %s into the guild bank?",
+    button1 = "Deposit",
+    button2 = "Cancel",
+    OnAccept = function()
+        deposit_tithe(true)
+    end,
+    timeout = 0,
+    hideOnEscape = true,
+}
+
+
+-- Covering what's owed wipes the debt. Less than that just lowers it.
+local function pay_off_debt(copper)
+    -- No rate yet means no way to turn copper back into debt. The queued row still has the deposit.
+    if shared.tithe_rate == nil then
+        return
+    end
+
+    local amount_owed = math.floor(guild_debt * shared.tithe_rate)
+
+    if copper >= amount_owed then
+        guild_debt = 0
+    else
+        guild_debt = guild_debt - copper / shared.tithe_rate
+    end
+end
+
+
+-- Every gold deposit goes through here: the DeeprunDeposit button and Blizzard's own deposit box.
+-- Assumes the deposit went through. The ledger's bank check catches any that didn't.
+hooksecurefunc("DepositGuildBankMoney", function(copper)
+    pay_off_debt(copper)
+    record_deposit(copper, 0, 0)
+    update_bank_button()
+end)
+
+
+local function on_item_deposited(item_id, item_count)
+    pay_off_debt(shared.itemCreditValue(item_id, item_count))
+    record_item_deposit(item_id, item_count)
+    update_bank_button()
+end
+
+
+-- How many of this item are in a guild bank slot
+local function bank_slot_count(tab, slot, item_id)
+    local item_link = GetGuildBankItemLink(tab, slot)
+    if item_link == nil then
+        return 0
+    end
+
+    if C_Item.GetItemInfoInstant(item_link) ~= item_id then
+        return 0
+    end
+
+    local texture, item_count = GetGuildBankItemInfo(tab, slot)
+    return item_count
+end
+
+
+-- Dragging a bag item onto a guild bank slot.
+-- cursor_item_id is only set for bag items, so moving things around inside the bank doesn't count.
+-- A split stack's size isn't known from the cursor, so the slot gets counted before and after.
+hooksecurefunc("PickupGuildBankItem", function(tab, slot)
+    if cursor_item_id == nil then
+        return
+    end
+
+    pending_bank_deposit = {
+        tab = tab,
+        slot = slot,
+        item_id = cursor_item_id,
+        count_before = bank_slot_count(tab, slot, cursor_item_id),
+    }
+end)
+
+
+local function check_bank_deposit()
+    if pending_bank_deposit == nil then
+        return
+    end
+
+    local count_after = bank_slot_count(pending_bank_deposit.tab, pending_bank_deposit.slot, pending_bank_deposit.item_id)
+    local item_count = count_after - pending_bank_deposit.count_before
+
+    -- Hasn't landed yet
+    if item_count <= 0 then
+        return
+    end
+
+    on_item_deposited(pending_bank_deposit.item_id, item_count)
+    pending_bank_deposit = nil
+end
+
+
+-- Right-clicking a bag item while the guild bank is open puts it in the bank
+hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot)
+    if GuildBankFrame == nil then
+        return
+    end
+
+    if not GuildBankFrame:IsShown() then
         return
     end
 
@@ -143,384 +350,99 @@ hooksecurefunc(C_Container, "PickupContainerItem", function(bag, slot)
         return
     end
 
-    if info.quality ~= Enum.ItemQuality.Poor then
-        return
-    end
-
-    local vendor_price = select(11, C_Item.GetItemInfo(info.itemID))
-    gray_on_cursor_value = vendor_price * info.stackCount
-end)
-
-hooksecurefunc("ClearCursor", function()
-    gray_on_cursor_value = nil
-end)
-
--- Deleting a gray takes back its debt. It can wipe debt out but never turns into credit,
--- so grays looted before tithes started can't be deleted for gold.
-hooksecurefunc("DeleteCursorItem", function()
-    if gray_on_cursor_value == nil then
-        return
-    end
-
-    if guild_debt > 0 then
-        guild_debt = math.max(guild_debt - gray_on_cursor_value, 0)
-    end
-
-    gray_on_cursor_value = nil
+    on_item_deposited(info.itemID, info.stackCount)
 end)
 
 
-local function moneyText(copper)
-    if copper == 0 then
-        return "0"
-    end
-    return GetMoneyString(copper)
-end
-
-
--- The gold typed into the mail so far. C.O.D. isn't payment, so it counts as none.
-local function goldInMail()
-    if not SendMailSendMoneyButton:GetChecked() then
-        return 0
-    end
-
-    return MoneyInputFrame_GetCopper(SendMailMoney)
-end
-
-
--- The gold that covers whatever the attached items don't
-local function goldToPay(amount_owed, items_value)
-    local gold_needed = amount_owed - items_value
-
-    if gold_needed < 0 then
-        return 0
-    end
-
-    return gold_needed
-end
-
-
--- True once the button has filled in this mail
-local function mailIsFilledIn()
-    if pending_transaction_id == nil then
-        return false
-    end
-
-    if not string.find(SendMailSubjectEditBox:GetText(), pending_transaction_id, 1, true) then
-        return false
-    end
-
-    return true
-end
-
-
-local function update_pay_button(amount_owed, items_value)
-    local gold_to_pay = goldToPay(amount_owed, items_value)
-    local gold_needed = amount_owed - items_value
-
-    pay_button:Enable()
-
-    if mailIsFilledIn() then
-        if goldInMail() == gold_to_pay then
-            pay_button:SetText("Ready, click Send")
-            pay_button:Disable()
-            return
-        end
-
-        pay_button:SetText("Update gold: " .. moneyText(gold_to_pay))
-        return
-    end
-
-    if gold_needed < 0 then
-        pay_button:SetText("Covered, +" .. moneyText(-gold_needed) .. " credit")
-        return
-    end
-
-    if gold_needed == 0 then
-        pay_button:SetText("Covered, fill in mail")
-        return
-    end
-
-    pay_button:SetText("Pay " .. moneyText(gold_to_pay))
-end
-
-
--- Overpaying leaves guild_debt below zero, which is credit towards future tithes
-local function tithe_credit()
-    if guild_debt >= 0 then
-        return 0
-    end
-
-    -- The postage refund stays hidden. It just quietly covers the next bit of debt.
-    local credit = math.floor(-guild_debt * shared.tithe_rate) - postage_refund
-
-    if credit < 0 then
-        return 0
-    end
-
-    return credit
-end
-
-
-local function update_tithe_bar()
-    -- Hidden with alpha, because really hiding it would stop these checks from running
-    if not IsInGuild() then
-        tithe_bar:SetAlpha(0)
-        pay_button:Hide()
-        return
-    end
-
-    if playerIsTreasurer() then
-        tithe_bar:SetAlpha(0)
-        pay_button:Hide()
-        return
-    end
-
-    tithe_bar:SetAlpha(1)
-    pay_button:Show()
-
-    if shared.tithe_rate == nil then
-        tithe_bar:SetValue(0)
-        pay_button:SetText("Not set up")
-        pay_button:Disable()
-        return
-    end
-
-    local amount_owed = amountOwed()
-
-    if amount_owed <= 0 then
-        tithe_bar:SetMinMaxValues(0, 1)
-        tithe_bar:SetValue(1)
-        tithe_bar:SetStatusBarColor(0.25, 0.8, 0.4, 0.4)
-
-        pay_button:Disable()
-
-        if tithe_credit() > 0 then
-            pay_button:SetText("Credit " .. moneyText(tithe_credit()))
-            return
-        end
-
-        pay_button:SetText("All paid up")
-        return
-    end
-
-    local items_value = attachedItemsTitheValue()
-    local amount_covered = items_value + goldInMail()
-
-    tithe_bar:SetMinMaxValues(0, amount_owed)
-    tithe_bar:SetValue(amount_covered)
-
-    update_pay_button(amount_owed, items_value)
-
-    if amount_covered >= amount_owed then
-        tithe_bar:SetStatusBarColor(0.25, 0.8, 0.4, 0.4)
-    else
-        tithe_bar:SetStatusBarColor(1, 0.82, 0, 0.4)
-    end
-end
-
-
--- Fills in the mail. Gold covers whatever the attached items don't. The player still clicks Send.
-local function fill_tithe_mail()
-    local amount_owed = amountOwed()
-
-    if amount_owed <= 0 then
-        return
-    end
-
-    -- The bar shows on the Inbox tab too, and the mail can only be filled in on Send
-    if not SendMailFrame:IsShown() then
-        MailFrameTab_OnClick(nil, 2)
-    end
-
-    pending_transaction_id = makeTransactionID(GetServerTime(), fullPlayerName())
-
-    SendMailNameEditBox:SetText(shared.treasurers[1])
-    -- The ID goes in the subject so the ledger can check it without opening the mail
-    SendMailSubjectEditBox:SetText(tithe_subject .. " " .. pending_transaction_id)
-    SendMailBodyEditBox:SetText("")
-    SendMailSendMoneyButton:SetChecked(true)
-    SendMailCODButton:SetChecked(false)
-
-    MoneyInputFrame_SetCopper(SendMailMoney, goldToPay(amount_owed, attachedItemsTitheValue()))
-
-    update_tithe_bar()
-end
-
-
--- The detail that doesn't fit on the bar. Items worth nothing are dimmed.
-local function show_tithe_tooltip(self)
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:AddLine("Deeprun Tithe")
-
-    if shared.tithe_rate == nil then
-        GameTooltip:AddLine("Waiting for a code in Guild Info", 1, 1, 1)
-        GameTooltip:Show()
-        return
-    end
-
-    local amount_owed = amountOwed()
-
-    if amount_owed <= 0 then
-        GameTooltip:AddDoubleLine("Credit", moneyText(tithe_credit()), 1, 1, 1, 1, 1, 1)
-        GameTooltip:Show()
-        return
-    end
-
-    local amount_attached = attachedItemsTitheValue() + goldInMail()
-
-    GameTooltip:AddDoubleLine("Owed", moneyText(amount_owed), 1, 1, 1, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Attached", moneyText(amount_attached), 1, 1, 1, 1, 1, 1)
-
-    for slot = 1, ATTACHMENTS_MAX_SEND do
-        if HasSendMailItem(slot) then
-            local item_name, item_id, item_texture, stack_count, item_quality = GetSendMailItem(slot)
-            local item_value = itemTitheValue(item_id, stack_count, item_quality)
-            local item_text = "  " .. item_name .. " x" .. stack_count
-
-            if item_value == 0 then
-                GameTooltip:AddDoubleLine(item_text, "0", 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
-            else
-                GameTooltip:AddDoubleLine(item_text, moneyText(item_value), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
-            end
-        end
-    end
-
-    local amount_remaining = amount_owed - amount_attached
-    if amount_remaining < 0 then
-        amount_remaining = 0
-    end
-
-    GameTooltip:AddDoubleLine("Remaining", moneyText(amount_remaining), 1, 0.82, 0, 1, 0.82, 0)
-    GameTooltip:Show()
-end
-
-
-local function hide_tithe_tooltip()
-    GameTooltip:Hide()
-end
-
-
--- Checked a few times a second, because typing gold doesn't fire any event.
--- It only runs while the mailbox is open.
-local function on_bar_update(self, elapsed)
-    seconds_since_refresh = seconds_since_refresh + elapsed
-
-    if seconds_since_refresh < refresh_every_seconds then
-        return
-    end
-
-    seconds_since_refresh = 0
-    update_tithe_bar()
-end
-
-
--- Sits in the gap to the right of the tabs, on both the Inbox and Send Mail tabs.
--- Anchored to the tab and the mailbox's corner, so it fills exactly that gap.
-local function create_tithe_bar()
-    tithe_bar = CreateFrame("StatusBar", nil, MailFrame)
-    tithe_bar:SetPoint("BOTTOMLEFT", MailFrameTab2, "BOTTOMRIGHT", 4, 4)
-    tithe_bar:SetPoint("TOPRIGHT", MailFrame, "BOTTOMRIGHT", -2, -2)
-    tithe_bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-
-    local background = tithe_bar:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints()
-    background:SetColorTexture(0.05, 0.05, 0.06, 0.97)
-
-    -- The button sits on top of the bar, so the gold fills up behind its text
-    pay_button = CreateFrame("Button", nil, tithe_bar)
-    pay_button:SetAllPoints()
-    pay_button:SetNormalFontObject("GameFontHighlightSmall")
-    pay_button:SetDisabledFontObject("GameFontHighlightSmall")
-    pay_button:SetText("All paid up")
-    pay_button:SetScript("OnClick", fill_tithe_mail)
-    pay_button:SetScript("OnEnter", show_tithe_tooltip)
-    pay_button:SetScript("OnLeave", hide_tithe_tooltip)
-
-    local hover = pay_button:CreateTexture(nil, "HIGHLIGHT")
-    hover:SetAllPoints()
-    hover:SetColorTexture(1, 1, 1, 0.08)
-
-    tithe_bar:SetScript("OnUpdate", on_bar_update)
-end
-
-
--- Runs right after Send is clicked, while the gold and items are still attached.
--- Only counts once MAIL_SEND_SUCCESS fires.
-hooksecurefunc("SendMail", function(recipient, subject, body)
-    pending_credit = 0
-
-    if pending_transaction_id == nil then
-        return
-    end
-
-    if string.lower(recipient) ~= string.lower(shared.treasurers[1]) then
-        return
-    end
-
-    if not string.find(subject, pending_transaction_id, 1, true) then
-        return
-    end
-
-    if GetSendMailCOD() > 0 then
-        return
-    end
-
-    local tithe_paid = GetSendMailMoney() + attachedItemsTitheValue() + postage_refund
-
-    pending_credit = tithe_paid / shared.tithe_rate
-end)
-
-
--- Debug: the raw numbers, bottom middle of the screen, refreshed twice a second
-local function create_debug_text()
-    local debug_text = UIParent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    debug_text:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 20)
-
-    C_Timer.NewTicker(0.5, function()
-        if shared.tithe_rate == nil then
-            debug_text:SetText("debt " .. math.floor(guild_debt) .. "c  |  rate not loaded")
-            return
-        end
-
-        debug_text:SetText(
-            "debt " .. math.floor(guild_debt) .. "c"
-            .. "  |  rate " .. shared.tithe_rate
-            .. "  |  owed " .. moneyText(math.max(amountOwed(), 0))
-            .. "  |  credit " .. moneyText(tithe_credit())
-            .. "  |  gray on cursor " .. tostring(gray_on_cursor_value)
-        )
+hooksecurefunc("DeleteCursorItem", on_item_deleted)
+
+
+------------------------------------------------------------
+-- Buttons
+------------------------------------------------------------
+
+-- The guild bank window only exists once Blizzard_GuildBankUI has loaded
+local function create_bank_button()
+    DeeprunDeposit = CreateFrame("Button", nil, GuildBankFrame, "UIPanelButtonTemplate")
+    DeeprunDeposit:SetSize(300, 26)
+    DeeprunDeposit:SetPoint("BOTTOM", GuildBankFrame, "TOP", 0, 4)
+    DeeprunDeposit:SetScript("OnClick", function()
+        deposit_tithe()
     end)
+    DeeprunDeposit:SetScript("OnShow", update_bank_button)
+    update_bank_button()
 end
 
+
+local function create_mail_button()
+    mail_button = CreateFrame("Button", nil, MailFrame, "UIPanelButtonTemplate")
+    mail_button:SetSize(300, 26)
+    mail_button:SetPoint("BOTTOM", MailFrame, "TOP", 0, 4)
+    mail_button:SetText("Deposit in the Guild Bank")
+end
+
+
+------------------------------------------------------------
+-- Events
+------------------------------------------------------------
 
 local tithe_frame = CreateFrame("Frame")
 tithe_frame:RegisterEvent("PLAYER_LOGIN")
+tithe_frame:RegisterEvent("ADDON_LOADED")
 tithe_frame:RegisterEvent("CHAT_MSG_LOOT")
-tithe_frame:RegisterEvent("MAIL_SEND_SUCCESS")
-tithe_frame:RegisterEvent("MAIL_FAILED")
+tithe_frame:RegisterEvent("CHAT_MSG_ADDON")
+tithe_frame:RegisterEvent("CURSOR_CHANGED")
+tithe_frame:RegisterEvent("GUILDBANKBAGSLOTS_CHANGED")
+tithe_frame:RegisterEvent("GUILDBANKFRAME_CLOSED")
 
 tithe_frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
         if guild_debt == nil then
             guild_debt = 0
         end
-        create_tithe_bar()
 
-        if show_debug_text then
-            create_debug_text()
+        if tithe_queue == nil then
+            tithe_queue = {}
+        end
+
+        if tithe_archive == nil then
+            tithe_archive = {}
+        end
+
+        C_ChatInfo.RegisterAddonMessagePrefix(shared.prefix)
+        C_Timer.NewTicker(30, drain_queue)
+
+        create_mail_button()
+
+        -- Another addon may have loaded the guild bank window already
+        if C_AddOns.IsAddOnLoaded("Blizzard_GuildBankUI") then
+            create_bank_button()
+        end
+
+    elseif event == "ADDON_LOADED" then
+        local loaded_addon_name = ...
+        if loaded_addon_name == "Blizzard_GuildBankUI" and DeeprunDeposit == nil then
+            create_bank_button()
         end
 
     elseif event == "CHAT_MSG_LOOT" then
         on_loot_message(...)
 
-    elseif event == "MAIL_SEND_SUCCESS" then
-        guild_debt = guild_debt - pending_credit
-        pending_credit = 0
-        pending_transaction_id = nil
-        update_tithe_bar()
+    elseif event == "CHAT_MSG_ADDON" then
+        local message_prefix, message = ...
+        if message_prefix == shared.prefix then
+            RDY_listen(message)
+            row_acked(message)
+        end
 
-    elseif event == "MAIL_FAILED" then
-        pending_credit = 0
+    elseif event == "CURSOR_CHANGED" then
+        remember_cursor_item()
+
+    elseif event == "GUILDBANKBAGSLOTS_CHANGED" then
+        check_bank_deposit()
+
+    -- A drop that never landed shouldn't pick up someone else's deposit later
+    elseif event == "GUILDBANKFRAME_CLOSED" then
+        pending_bank_deposit = nil
     end
 end)

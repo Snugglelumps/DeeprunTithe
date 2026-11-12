@@ -1,11 +1,10 @@
 ## Interface: 16001
 ## Title: Deeprun Tithe
-## Notes: Tallies a tithe on junk you loot and fills in the payment mail.
+## Notes: Tallies a tithe on junk you loot. Pay it at the guild bank.
 ## Author: Snugglelumps
 ## X-Curse-Project-ID: 1788233
 ## Version: @project-version@
-## SavedVariablesPerCharacter: guild_debt, DeeprunTitheConfig
+## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive
 
-sha256.lua
-guild_config.lua
+DeeprunShared.lua
 DeeprunTithe.lua
