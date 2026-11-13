@@ -1,10 +1,7 @@
 -- Deeprun Tithe
 
--- The prefix, tithe rate, transaction IDs and messages come from DeeprunShared.lua
+-- The prefix, settings, transaction IDs and messages come from DeeprunShared.lua
 local addon_name, shared = ...
-
--- Settings
-local tithes_start_after_level = 10
 
 -- Saved per character (see DeeprunTithe.toc):
 --   guild_debt     full vendor value of junk looted. What you owe is guild_debt * tithe_rate.
@@ -24,8 +21,10 @@ local cursor_item_count = 0
 -- A bag item dropped on a guild bank slot, waiting for the slot to show it landed
 local pending_bank_deposit = nil
 
-local DeeprunDeposit = nil     -- the button on the guild bank
+local DeeprunDeposit = nil     -- the Pay Tithe button on the guild bank
 local mail_sign = nil
+local rules_card = nil         -- the rule under the tithe bar, until it's accepted
+local rules_popup = nil
 
 
 ------------------------------------------------------------
@@ -34,7 +33,7 @@ local mail_sign = nil
 
 -- Looting junk adds its vendor value to guild_debt
 local function on_loot_message(loot_text)
-    if UnitLevel("player") <= tithes_start_after_level then
+    if UnitLevel("player") < shared.tithes_start_at_level then
         return
     end
 
@@ -195,11 +194,6 @@ local function update_bank_button()
         return
     end
 
-    if shared.tithe_rate == nil then
-        DeeprunDeposit:SetText("Not set up")
-        return
-    end
-
     local amount_owed = math.floor(guild_debt * shared.tithe_rate)
 
     if amount_owed <= 0 then
@@ -211,53 +205,8 @@ local function update_bank_button()
 end
 
 
-local function deposit_tithe(confirmed)
-    if shared.tithe_rate == nil then
-        return
-    end
-
-    local deposit = math.floor(guild_debt * shared.tithe_rate)
-
-    if deposit <= 0 then
-        return
-    end
-
-    if GetMoney() < deposit then
-        print("Deeprun Tithe: you don't have enough gold to cover the tithe.")
-        return
-    end
-
-    if confirmed == nil then
-        if deposit > GetMoney() * 0.1 then
-            StaticPopup_Show("DEEPRUN_DEPOSIT_POPUP", GetMoneyString(deposit))
-            return
-        end
-    end
-
-    -- The DepositGuildBankMoney hook below records it and lowers the debt
-    DepositGuildBankMoney(deposit)
-end
-
-
-StaticPopupDialogs["DEEPRUN_DEPOSIT_POPUP"] = {
-    text = "Deposit %s into the guild bank?",
-    button1 = "Deposit",
-    button2 = "Cancel",
-    OnAccept = function()
-        deposit_tithe(true)
-    end,
-    timeout = 0,
-    hideOnEscape = true,
-}
-
-
 -- Covering what's owed wipes the debt. Less than that just lowers it.
 local function pay_off_debt(copper)
-    -- No rate yet means no way to turn copper back into debt. The queued row still has the deposit.
-    if shared.tithe_rate == nil then
-        return
-    end
-
     local amount_owed = math.floor(guild_debt * shared.tithe_rate)
 
     if copper >= amount_owed then
@@ -268,13 +217,155 @@ local function pay_off_debt(copper)
 end
 
 
--- Every gold deposit goes through here: the DeeprunDeposit button and Blizzard's own deposit box.
+-- Only gold paid through our buttons counts. Blizzard's own Deposit is left alone,
+-- so treasurers can move guild gold in and out without it counting as anyone's tithe.
 -- Assumes the deposit went through. The ledger's bank check catches any that didn't.
-hooksecurefunc("DepositGuildBankMoney", function(copper)
+local function pay_tithe(copper)
+    if GetMoney() < copper then
+        print("Deeprun Tithe: you don't have that much gold.")
+        return
+    end
+
+    DepositGuildBankMoney(copper)
     pay_off_debt(copper)
     record_deposit(copper, 0, 0)
     update_bank_button()
-end)
+end
+
+
+-- Pay Tithe: exactly what's owed. Asks first if it's more than a tenth of your gold.
+local function pay_what_is_owed(confirmed)
+    local amount_owed = math.floor(guild_debt * shared.tithe_rate)
+
+    if amount_owed <= 0 then
+        return
+    end
+
+    if confirmed == nil then
+        if amount_owed > GetMoney() * 0.1 then
+            StaticPopup_Show("DEEPRUN_DEPOSIT_POPUP", GetMoneyString(amount_owed))
+            return
+        end
+    end
+
+    pay_tithe(amount_owed)
+end
+
+
+StaticPopupDialogs["DEEPRUN_DEPOSIT_POPUP"] = {
+    text = "Deposit %s into the guild bank?",
+    button1 = "Deposit",
+    button2 = "Cancel",
+    OnAccept = function()
+        pay_what_is_owed(true)
+    end,
+    timeout = 0,
+    hideOnEscape = true,
+}
+
+
+------------------------------------------------------------
+-- Pay another amount
+------------------------------------------------------------
+
+-- Forever's popups don't show a money box, so this is our own, made to look like one.
+-- Typing the amount in is the confirmation.
+local custom_tithe_frame = nil
+local gold_box = nil
+local silver_box = nil
+local copper_box = nil
+
+
+local function pay_typed_amount()
+    local gold = tonumber(gold_box:GetText()) or 0
+    local silver = tonumber(silver_box:GetText()) or 0
+    local copper = tonumber(copper_box:GetText()) or 0
+
+    custom_tithe_frame:Hide()
+
+    local amount = gold * 10000 + silver * 100 + copper
+    if amount > 0 then
+        pay_tithe(amount)
+    end
+end
+
+
+-- A number box with its coin after it
+local function make_coin_box(left, width, max_letters, coin_texture)
+    local box = CreateFrame("EditBox", nil, custom_tithe_frame, "InputBoxTemplate")
+    box:SetSize(width, 20)
+    box:SetPoint("TOPLEFT", custom_tithe_frame, "TOPLEFT", left, -44)
+    box:SetAutoFocus(false)
+    box:SetNumeric(true)
+    box:SetMaxLetters(max_letters)
+    box:SetScript("OnEnterPressed", pay_typed_amount)
+    box:SetScript("OnEscapePressed", function()
+        custom_tithe_frame:Hide()
+    end)
+
+    local coin = custom_tithe_frame:CreateTexture(nil, "ARTWORK")
+    coin:SetSize(14, 14)
+    coin:SetPoint("LEFT", box, "RIGHT", 2, 0)
+    coin:SetTexture(coin_texture)
+
+    return box
+end
+
+
+local function create_custom_tithe_frame()
+    custom_tithe_frame = CreateFrame("Frame", "DeeprunCustomTitheFrame", UIParent, "BackdropTemplate")
+    custom_tithe_frame:SetSize(300, 116)
+    custom_tithe_frame:SetPoint("TOP", UIParent, "TOP", 0, -135)
+    custom_tithe_frame:SetFrameStrata("DIALOG")
+    custom_tithe_frame:EnableMouse(true)
+    custom_tithe_frame:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+    table.insert(UISpecialFrames, "DeeprunCustomTitheFrame")
+
+    local question = custom_tithe_frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    question:SetPoint("TOP", custom_tithe_frame, "TOP", 0, -20)
+    question:SetText("How much would you like to tithe?")
+
+    gold_box = make_coin_box(52, 64, 6, "Interface\\MoneyFrame\\UI-GoldIcon")
+    silver_box = make_coin_box(144, 32, 2, "Interface\\MoneyFrame\\UI-SilverIcon")
+    copper_box = make_coin_box(204, 32, 2, "Interface\\MoneyFrame\\UI-CopperIcon")
+
+    local tithe_button = CreateFrame("Button", nil, custom_tithe_frame, "UIPanelButtonTemplate")
+    tithe_button:SetSize(110, 22)
+    tithe_button:SetPoint("BOTTOMRIGHT", custom_tithe_frame, "BOTTOM", -4, 18)
+    tithe_button:SetText("Tithe")
+    tithe_button:SetScript("OnClick", pay_typed_amount)
+
+    local cancel_button = CreateFrame("Button", nil, custom_tithe_frame, "UIPanelButtonTemplate")
+    cancel_button:SetSize(110, 22)
+    cancel_button:SetPoint("BOTTOMLEFT", custom_tithe_frame, "BOTTOM", 4, 18)
+    cancel_button:SetText("Cancel")
+    cancel_button:SetScript("OnClick", function()
+        custom_tithe_frame:Hide()
+    end)
+
+    custom_tithe_frame:Hide()
+end
+
+
+-- Opens empty, with the cursor in the gold box
+local function show_custom_tithe_frame()
+    if custom_tithe_frame == nil then
+        create_custom_tithe_frame()
+    end
+
+    gold_box:SetText("")
+    silver_box:SetText("")
+    copper_box:SetText("")
+    custom_tithe_frame:Show()
+    gold_box:SetFocus()
+end
 
 
 local function on_item_deposited(item_id, item_count)
@@ -361,27 +452,182 @@ hooksecurefunc("DeleteCursorItem", on_item_deleted)
 -- Buttons
 ------------------------------------------------------------
 
--- The guild bank window only exists once Blizzard_GuildBankUI has loaded.
--- Same look as the mail sign, in the gap to the right of the bank's tabs.
-local function create_bank_button()
-    DeeprunDeposit = CreateFrame("Button", nil, GuildBankFrame)
-    DeeprunDeposit:SetPoint("BOTTOMLEFT", GuildBankFrameTab4, "BOTTOMRIGHT", 4, 4)
-    DeeprunDeposit:SetPoint("TOPRIGHT", GuildBankFrame, "BOTTOMRIGHT", -2, -2)
-    DeeprunDeposit:SetNormalFontObject("GameFontHighlightSmall")
+-- A flat dark button on the tithe bar, lighter when you hover it
+local function make_bar_button(parent)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetNormalFontObject("GameFontHighlightSmall")
 
-    local background = DeeprunDeposit:CreateTexture(nil, "BACKGROUND")
+    local background = button:CreateTexture(nil, "BACKGROUND")
     background:SetAllPoints()
     background:SetColorTexture(0.05, 0.05, 0.06, 0.97)
 
-    local hover = DeeprunDeposit:CreateTexture(nil, "HIGHLIGHT")
+    local hover = button:CreateTexture(nil, "HIGHLIGHT")
     hover:SetAllPoints()
     hover:SetColorTexture(1, 1, 1, 0.08)
 
-    DeeprunDeposit:SetScript("OnClick", function()
-        deposit_tithe()
+    return button
+end
+
+
+-- The popup the card's checkbox opens: the rule in more detail, and Accept.
+-- Accepting hides the card for good on this account (tithe_rules_accepted).
+local function create_rules_popup()
+    rules_popup = CreateFrame("Frame", "DeeprunRulesPopup", UIParent, "BackdropTemplate")
+    rules_popup:SetWidth(340)
+    rules_popup:SetPoint("TOP", UIParent, "TOP", 0, -135)
+    rules_popup:SetFrameStrata("DIALOG")
+    rules_popup:EnableMouse(true)
+    rules_popup:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+    table.insert(UISpecialFrames, "DeeprunRulesPopup")
+
+    local title = rules_popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", rules_popup, "TOP", 0, -22)
+    title:SetText("|TInterface\\MoneyFrame\\UI-GoldIcon:0|t Paying your tithe")
+
+    local details = rules_popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    details:SetPoint("TOP", title, "BOTTOM", 0, -12)
+    details:SetWidth(290)
+    details:SetJustifyH("LEFT")
+    details:SetSpacing(3)
+    details:SetText(
+        "Only gold paid with the |cffffd100Pay Tithe|r and |cffffd100Pay Custom Tithe|r buttons counts as tithe.\n\n"
+        .. "Gold you put in with the bank's own Deposit button isn't recorded, and won't lower what you owe. "
+        .. "Gold taken out with Withdraw isn't tracked either.\n\n"
+        .. "Trade goods you drop into the bank still count.\n\n"
+        .. "|cffffd100Is that okay?|r")
+
+    local accept_button = CreateFrame("Button", nil, rules_popup, "UIPanelButtonTemplate")
+    accept_button:SetSize(110, 22)
+    accept_button:SetPoint("BOTTOMRIGHT", rules_popup, "BOTTOM", -4, 18)
+    accept_button:SetText("Accept")
+    accept_button:SetScript("OnClick", function()
+        tithe_rules_accepted = true
+        rules_popup:Hide()
+        rules_card:Hide()
     end)
-    DeeprunDeposit:SetScript("OnShow", update_bank_button)
+
+    local cancel_button = CreateFrame("Button", nil, rules_popup, "UIPanelButtonTemplate")
+    cancel_button:SetSize(110, 22)
+    cancel_button:SetPoint("BOTTOMLEFT", rules_popup, "BOTTOM", 4, 18)
+    cancel_button:SetText("Cancel")
+    cancel_button:SetScript("OnClick", function()
+        rules_popup:Hide()
+    end)
+
+    -- However it closes without Accept, the checkbox goes back to empty
+    rules_popup:SetScript("OnHide", function()
+        rules_card.got_it:SetChecked(false)
+    end)
+
+    rules_popup:SetHeight(22 + title:GetStringHeight() + 12 + details:GetStringHeight() + 58)
+    rules_popup:Hide()
+end
+
+
+local function show_rules_popup()
+    if rules_popup == nil then
+        create_rules_popup()
+    end
+
+    rules_popup:Show()
+end
+
+
+-- The card under the tithe bar with the rule. Same width as the two buttons.
+-- Same dark as the bar, with a thin gold border. A "Got it" checkbox in the corner opens the popup above.
+local function create_rules_card(tithe_bar)
+    rules_card = CreateFrame("Frame", nil, GuildBankFrame, "BackdropTemplate")
+    rules_card:SetPoint("TOPLEFT", tithe_bar, "BOTTOMLEFT", 0, -4)
+    rules_card:SetPoint("TOPRIGHT", tithe_bar, "BOTTOMRIGHT", 0, -4)
+    rules_card:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    rules_card:SetBackdropColor(0.05, 0.05, 0.06, 0.97)
+    rules_card:SetBackdropBorderColor(1, 0.82, 0, 0.6)
+
+    local rule = rules_card:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rule:SetPoint("TOPLEFT", rules_card, "TOPLEFT", 14, -12)
+    rule:SetJustifyH("LEFT")
+    rule:SetSpacing(3)
+    rule:SetText("Only gold paid with the |cffffd100buttons above|r counts as tithe. Trade goods you drop in the bank count too.")
+
+    -- The alert triangle, tinted red
+    local warning = rules_card:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    warning:SetPoint("TOPLEFT", rule, "BOTTOMLEFT", 0, -8)
+    warning:SetJustifyH("LEFT")
+    warning:SetSpacing(3)
+    warning:SetText("|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:0:0:0:0:64:64:0:64:0:64:255:70:70|t "
+        .. "|cffff7f50The bank's own Deposit button does not count.|r")
+
+    -- "Got it" and its checkbox sit at the end of the warning's row
+    local got_it_label = rules_card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    got_it_label:SetPoint("LEFT", warning, "RIGHT", 4, 0)
+    got_it_label:SetText("Got it")
+
+    rules_card.got_it = CreateFrame("CheckButton", nil, rules_card, "UICheckButtonTemplate")
+    rules_card.got_it:SetSize(20, 20)
+    rules_card.got_it:SetPoint("LEFT", got_it_label, "RIGHT", 2, 0)
+    rules_card.got_it:SetScript("OnClick", show_rules_popup)
+
+    -- The text wraps to the card's width, and the card grows to fit it.
+    -- The warning leaves 60 on its right for "Got it" and the checkbox.
+    local function fit_text()
+        local text_width = rules_card:GetWidth() - 28
+        rule:SetWidth(text_width)
+        warning:SetWidth(text_width - 60)
+        rules_card:SetHeight(12 + rule:GetStringHeight() + 8 + warning:GetStringHeight() + 12)
+    end
+
+    rules_card:SetScript("OnSizeChanged", fit_text)
+    rules_card:SetScript("OnShow", fit_text)
+
+    if tithe_rules_accepted then
+        rules_card:Hide()
+    end
+end
+
+
+-- The guild bank window only exists once Blizzard_GuildBankUI has loaded.
+-- Same look as the mail sign, in the gap to the right of the bank's tabs:
+-- Pay Tithe on the left two thirds, Pay Custom Tithe on the right third.
+local function create_bank_button()
+    local tithe_bar = CreateFrame("Frame", nil, GuildBankFrame)
+    tithe_bar:SetPoint("BOTTOMLEFT", GuildBankFrameTab4, "BOTTOMRIGHT", 4, 4)
+    tithe_bar:SetPoint("TOPRIGHT", GuildBankFrame, "BOTTOMRIGHT", -2, -2)
+
+    local custom_button = make_bar_button(tithe_bar)
+    custom_button:SetPoint("TOPRIGHT")
+    custom_button:SetPoint("BOTTOMRIGHT")
+    custom_button:SetText("Pay Custom Tithe")
+    custom_button:SetScript("OnClick", show_custom_tithe_frame)
+
+    -- A 4 pixel gap between them so they don't touch
+    DeeprunDeposit = make_bar_button(tithe_bar)
+    DeeprunDeposit:SetPoint("TOPLEFT")
+    DeeprunDeposit:SetPoint("BOTTOMRIGHT", custom_button, "BOTTOMLEFT", -4, 0)
+    DeeprunDeposit:SetScript("OnClick", function()
+        pay_what_is_owed()
+    end)
+
+    -- The bar's width isn't known until the bank lays itself out
+    tithe_bar:SetScript("OnSizeChanged", function(self, width)
+        custom_button:SetWidth((width - 4) / 3)
+    end)
+
+    tithe_bar:SetScript("OnShow", update_bank_button)
     update_bank_button()
+
+    create_rules_card(tithe_bar)
 end
 
 
@@ -427,8 +673,6 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
         if tithe_archive == nil then
             tithe_archive = {}
         end
-
-        print("|TInterface\\MoneyFrame\\UI-GoldIcon:0|t |cffffd100DeeprunTithe|r: All payments must be made to the Guild Bank by EOD")
 
         C_ChatInfo.RegisterAddonMessagePrefix(shared.prefix)
         C_Timer.NewTicker(30, drain_queue)

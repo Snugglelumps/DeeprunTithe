@@ -5,8 +5,10 @@
 local addon_name, shared = ...
 
 shared.prefix = "deeprun"
-shared.tithe_rate = nil
-shared.trade_good_rate = nil
+-- Used until Guild Info says otherwise
+shared.tithe_rate = 0.05
+shared.trade_good_rate = 2
+shared.tithes_start_at_level = 20
 
 -- The Guild Info code last read, so the same one isn't read twice
 local known_settings_code = nil
@@ -62,10 +64,6 @@ function shared.itemCreditValue(item_id, item_count)
     local item_quality = select(3, C_Item.GetItemInfo(item_id))
     local vendor_price = select(11, C_Item.GetItemInfo(item_id))
 
-    if shared.trade_good_rate == nil then
-        return 0
-    end
-
     if vendor_price == nil then
         return 0
     end
@@ -82,26 +80,34 @@ end
 -- Guild Info settings
 ------------------------------------------------------------
 
--- The settings are a [[base64]] code in Guild Info. Decoded, it's key=value; pairs, like r=0.05;t=2;
--- r is the tithe rate and t is the trade good rate.
--- Returns both rates, or nil if it isn't a real code.
+-- The settings are a [[base64]] code in Guild Info. Decoded, it's key=value; pairs, like r=0.05;t=2;l=20;
+-- r is the tithe rate, t is the trade good rate, l is the level tithes start at.
+-- Keys can be in any order. A key that's missing or isn't a number comes back nil.
 function shared.readSettings(settings_code)
     local settings = C_EncodingUtil.DecodeBase64(settings_code)
     if settings == nil then
         return nil
     end
 
-    local tithe_rate = tonumber(string.match(settings, "^r=([^;]*)"))
-    if tithe_rate == nil then
-        return nil
+    local tithe_rate = nil
+    local trade_good_rate = nil
+    local tithes_start_at_level = nil
+
+    for key, value in string.gmatch(settings, "(%a+)=([^;]*);") do
+        if key == "r" then
+            tithe_rate = tonumber(value)
+        end
+
+        if key == "t" then
+            trade_good_rate = tonumber(value)
+        end
+
+        if key == "l" then
+            tithes_start_at_level = tonumber(value)
+        end
     end
 
-    local trade_good_rate = tonumber(string.match(settings, ";t=([^;]*)"))
-    if trade_good_rate == nil then
-        return nil
-    end
-
-    return tithe_rate, trade_good_rate
+    return tithe_rate, trade_good_rate, tithes_start_at_level
 end
 
 
@@ -134,13 +140,21 @@ local function readGuildInfo()
         return
     end
 
-    local tithe_rate, trade_good_rate = shared.readSettings(settings_code)
-    if tithe_rate == nil then
-        return
+    -- Only what Guild Info has replaces the defaults
+    local tithe_rate, trade_good_rate, tithes_start_at_level = shared.readSettings(settings_code)
+
+    if tithe_rate ~= nil then
+        shared.tithe_rate = tithe_rate
     end
 
-    shared.tithe_rate = tithe_rate
-    shared.trade_good_rate = trade_good_rate
+    if trade_good_rate ~= nil then
+        shared.trade_good_rate = trade_good_rate
+    end
+
+    if tithes_start_at_level ~= nil then
+        shared.tithes_start_at_level = tithes_start_at_level
+    end
+
     known_settings_code = settings_code
 end
 
