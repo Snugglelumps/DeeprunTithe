@@ -1,30 +1,31 @@
 # Deeprun Tithe
 
-A guild tithe for WoW Forever. It adds up the gray items you loot, works out what you owe the guild, and fills in the payment mail for you.
+A guild tithe for WoW Forever. When you sell gray items at a vendor, it works out what you owe the guild. You pay it at the guild bank.
 
 ## For members
 
-Install it and play. A small bar sits next to the Inbox and Send Mail tabs on the mailbox.
+Install it and play. What you owe shows at the bottom of your bags.
 
-1. Open a mailbox.
-2. Attach any trade goods you want to give. They count for 3x their vendor price. Gray items don't count, so vendor those and pay with the gold.
-3. Click the bar. It fills in the mail and the gold.
-4. Click Send.
+1. Sell your grays at any vendor. Your tithe goes up when you close the vendor.
+2. Open the guild bank. A bar sits under the tabs.
+3. Click **Pay Tithe** to pay exactly what you owe, or **Pay Custom Tithe** to pay a different amount.
 
-Hover over the bar to see what you owe and what's attached. If it says **Not set up**, your guild hasn't added its code yet. Your debt is still being tracked, so nothing is lost.
+Only gold paid with those two buttons counts. The bank's own Deposit button isn't recorded and won't lower what you owe.
 
-The guild covers your postage: each tithe you send takes 30 copper off what you'd owe next.
+Trade goods count too. Drop them in the guild bank and they're worth twice their vendor price off your tithe.
+
+Grays you keep, delete or give away aren't income, so they owe nothing.
 
 ## For guilds
 
-The addon has no settings. It reads your guild's rate, starting level and treasurers from a code in Guild Info, which looks like this:
+The addon has no settings. It reads your guild's rate, trade goods value and starting level from a code in Guild Info, which looks like this:
 
 ```
 [[cj0wLjA1O3Q9...]]
 ```
 
-Paste it anywhere in the Guild Information box and every member picks it up automatically. The code is made by Deeprun Ledger, the treasurer's addon, with `/drl hash`.
+Paste it anywhere in the Guild Information box and every member picks it up automatically. The code is made by Deeprun Ledger, the treasurer's addon, with `/drl hash`. Without a code, the tithe is 5%, trade goods count double, and tithes start at level 20.
 
-The first treasurer in the code receives the mail. All treasurers are exempt from tithes.
+Payments are sent to Deeprun Ledger over guild addon messages, and it checks them against the guild bank's money log.
 
-Anyone in your guild can read the code, and anyone who can edit Guild Info can change where tithes go, so keep that rank trusted. The transaction IDs stop casual and hand-typed fakes. They won't stop someone determined.
+Anyone in your guild can read the code, and anyone who can edit Guild Info can change the rates, so keep that rank trusted. The transaction IDs stop casual and hand-typed fakes. They won't stop someone determined.

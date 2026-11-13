@@ -1,13 +1,15 @@
 ## Interface: 16001
 ## Title: |cffc87533Deeprun|r Tithe
 ## IconTexture: Interface\Icons\INV_Misc_Coin_17
-## Notes: Tallies a tithe on junk you loot. Pay it at the guild bank.
+## Notes: Tallies a tithe on junk you sell. Pay it at the guild bank.
 ## Author: Snugglelumps
 ## X-Curse-Project-ID: 1788233
 ## Version: @project-version@
+## OptionalDeps: Baganator, Bagnon, AdiBags, ArkInventory, BetterBags
 ## SavedVariables: tithe_rules_accepted
 ## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive
 
 DeeprunShared.lua
 DeeprunTithe.lua
+DeeprunBagAddons.lua
 DeeprunLoginMessages.lua
