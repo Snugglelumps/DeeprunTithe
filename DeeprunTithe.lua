@@ -7,6 +7,7 @@ local addon_name, shared = ...
 --   guild_debt     full vendor value of junk sold. What you owe is guild_debt * tithe_rate.
 --   tithe_queue    deposits not yet confirmed by a ledger, oldest first
 --   tithe_archive  deposits a ledger has confirmed, kept for exporting later
+--   last_command_time  when the newest officer's SET we've done was made, so it's done once
 -- A queued row: { transactionID = "time|base64", time = ..., gold = ..., item_id = ..., count = ... }
 
 local last_rdy_time = 0        -- GetTime() when a ledger last said RDY
@@ -210,6 +211,62 @@ local function show_amount_owed()
     for _, debt_box in ipairs(debt_boxes) do
         debt_box:SetWidth(debt_box.text:GetStringWidth() + 20)
     end
+end
+
+
+------------------------------------------------------------
+-- Officers setting what you owe
+------------------------------------------------------------
+
+-- Anyone can send an addon message, so the sender has to be the Guild Master or an officer.
+-- Their rank comes from the guild roster, which can't be faked.
+-- Someone not in the roster yet is turned down. Their ledger sends again in 5 minutes.
+local function sent_by_officer(sender)
+    for member_number = 1, GetNumGuildMembers() do
+        local name, rank_name, rank_index = GetGuildRosterInfo(member_number)
+
+        if Ambiguate(name, "none") == Ambiguate(sender, "none") then
+            return rank_index <= 1
+        end
+    end
+
+    return false
+end
+
+
+-- SET from an officer's ledger: what you owe becomes their number.
+-- Their ledger keeps sending it until we say DONE, so a resend, or an older one
+-- arriving late, is only answered. last_command_time is the newest one done.
+local function command_listen(message, sender)
+    local message_type, player, command_time, owed = strsplit("|", message)
+
+    if message_type ~= "SET" then
+        return
+    end
+
+    if player ~= GetUnitName("player", true) then
+        return
+    end
+
+    if not sent_by_officer(sender) then
+        return
+    end
+
+    command_time = tonumber(command_time)
+    owed = tonumber(owed)
+
+    if command_time > last_command_time then
+        -- guild_debt is the vendor value before the rate. The extra half copper stops
+        -- rounding turning 12345 owed into 12344.
+        guild_debt = (owed + 0.5) / shared.tithe_rate
+        last_command_time = command_time
+        show_amount_owed()
+
+        print("|TInterface\\MoneyFrame\\UI-GoldIcon:0|t |cffffd100DeeprunTithe|r: "
+            .. Ambiguate(sender, "none") .. " set your tithe to " .. GetMoneyString(owed) .. ".")
+    end
+
+    send(shared.doneMessage(player, command_time))
 end
 
 
@@ -739,6 +796,10 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
             tithe_archive = {}
         end
 
+        if last_command_time == nil then
+            last_command_time = 0
+        end
+
         C_ChatInfo.RegisterAddonMessagePrefix(shared.prefix)
         C_Timer.NewTicker(30, drain_queue)
 
@@ -756,10 +817,11 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "CHAT_MSG_ADDON" then
-        local message_prefix, message = ...
+        local message_prefix, message, channel, sender = ...
         if message_prefix == shared.prefix then
             RDY_listen(message)
             row_acked(message)
+            command_listen(message, sender)
         end
 
     elseif event == "CURSOR_CHANGED" then

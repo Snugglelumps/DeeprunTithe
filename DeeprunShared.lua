@@ -55,6 +55,21 @@ function shared.ackMessage(transactionID)
 end
 
 
+-- An officer's ledger setting what a player owes, in copper.
+-- The time it was made tells a resend apart from a new one.
+-- SET|<player>|<time>|<owed>
+function shared.setMessage(command)
+    return "SET|" .. command.player .. "|" .. command.time .. "|" .. command.owed
+end
+
+
+-- That player's tithe saying it's done
+-- DONE|<player>|<time>
+function shared.doneMessage(player, command_time)
+    return "DONE|" .. player .. "|" .. command_time
+end
+
+
 ------------------------------------------------------------
 -- Items
 ------------------------------------------------------------

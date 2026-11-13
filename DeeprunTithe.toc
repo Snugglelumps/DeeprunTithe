@@ -7,7 +7,7 @@
 ## Version: @project-version@
 ## OptionalDeps: Baganator, Bagnon, AdiBags, ArkInventory, BetterBags
 ## SavedVariables: tithe_rules_accepted
-## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive
+## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive, last_command_time
 
 DeeprunShared.lua
 DeeprunTithe.lua
