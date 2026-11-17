@@ -13,6 +13,7 @@ Core\DeeprunShared.lua
 Core\DeeprunTithe.lua
 Chrome\DeeprunCelebrate.lua
 Chrome\DeeprunBagAddons.lua
+Chrome\DeeprunFog.lua
 World\DeeprunLoginMessages.lua
 World\DeeprunLore.lua
 World\DeeprunReminder.lua

@@ -107,11 +107,40 @@ local function meets_requirements(rank)
 end
 
 
+-- The fog rolls in first, the memo appears in it, and the fog lifts as the memo fades
+local function display_lore(rank)
+    local text = lore[rank]
+    local seconds_to_read = 4 + #text / 20
+    local fog_head_start = 1.5
+
+    shared.showFog(fog_head_start + seconds_to_read)
+
+    C_Timer.After(fog_head_start, function()
+        shared.showMemo(text, seconds_to_read)
+        shared.printTitheLine(text)
+    end)
+end
+
+
 local function show_lore(rank)
     C_Timer.After(lore_delay_seconds, function()
-        shared.showMemo(lore[rank])
-        shared.printTitheLine(lore[rank])
+        display_lore(rank)
     end)
+end
+
+
+-- DEBUG: remove before release.
+-- /lore 1-5 plays that rank's lore right away. Display only: the rank isn't changed.
+SLASH_DEEPRUNLORE1 = "/lore"
+SlashCmdList.DEEPRUNLORE = function(message)
+    local rank = tonumber(message)
+
+    if rank == nil or lore[rank] == nil then
+        print("Deeprun Tithe (debug): /lore 1-" .. #lore)
+        return
+    end
+
+    display_lore(rank)
 end
 
 
