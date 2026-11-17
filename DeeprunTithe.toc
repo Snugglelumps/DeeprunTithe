@@ -6,14 +6,16 @@
 ## X-Curse-Project-ID: 1788233
 ## Version: @project-version@
 ## OptionalDeps: Baganator, Bagnon, AdiBags, ArkInventory, BetterBags
-## SavedVariables: tithe_rules_accepted, tithe_settings, tithe_leaderboard, tithe_last_week, deeprun_client_id
-## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive, last_command_time, custom_tithe_this_week
+## SavedVariables: tithe_rules_accepted, tithe_settings, tithe_leaderboard, tithe_last_week, deeprun_client_id, trainer_table, tithe_history
+## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive, last_command_time, custom_tithe_this_week, tithe_reminder
 
-DeeprunShared.lua
-DeeprunTithe.lua
-DeeprunCelebrate.lua
-DeeprunBagAddons.lua
-DeeprunLoginMessages.lua
-DeeprunAccount.lua
-DeeprunWinners.lua
-DeeprunLeaderboard.lua
+Core\DeeprunShared.lua
+Core\DeeprunTithe.lua
+Chrome\DeeprunCelebrate.lua
+Chrome\DeeprunBagAddons.lua
+World\DeeprunLoginMessages.lua
+World\DeeprunLore.lua
+World\DeeprunReminder.lua
+Core\DeeprunAccount.lua
+Chrome\DeeprunWinners.lua
+Chrome\DeeprunLeaderboard.lua

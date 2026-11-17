@@ -4,6 +4,7 @@
 local addon_name, shared = ...
 
 -- Settings
+local commercial_enabled = false     -- off for now
 local commercial_odds = 420          -- 1 in this many logins get the commercial
 local commercial_line_seconds = 0.5
 
@@ -42,8 +43,8 @@ local login_messages = {
     [[Deeprun Freight Co. does not comment on ongoing litigation involving Jonathan Deeprun and a certain barmaid.]],
     [[Legal notice: Jonathan’s “business trips” to Booty Bay are business expenses, and are not to be discussed in guild chat.]],
     [[Did you see GPU prices?? Unrelated, tithes are doubled until further notice. -Management]],
-    [[Remember to check out Muscle Mathers' new single on SoundCloud]],
-    [[Hey everyone, Muscle Mathers' latest album is not doing so great, we're taking a collection in the guild bank. - Rebecca from HR]],
+    -- [[Remember to check out Muscle Mathers' new single on SoundCloud]],
+    -- [[Hey everyone, Muscle Mathers' latest album is not doing so great, we're taking a collection in the guild bank. - Rebecca from HR]],
     [[I'm going to say this one last time CLEAN OUT THE REHEAT-O-MATIC 3000 AFTER USE. The break room is a shared space. - Rebecca from HR]],
     [[Legal notice: We have just decided you can't sue.. ever..]],
     [[Welcome back. You were offline for 14 hours. I counted. - Rebecca from HR]],
@@ -51,12 +52,26 @@ local login_messages = {
     [[HR is here for you. HR is always here. HR is behind you. - Rebecca from HR]],
     [[Someone has been microwaving fish in the Reheat-O-Matic 3000. I know who you are. - Rebecca from HR]],
     [[Mr. Deeprun's gryphon has been repossessed. Unrelated, please pay your tithe.]],
-    [[Muscle Mathers' world tour has been canceled due to low ticket sales. Tithes are now being accepted as condolences. - Rebecca from HR]],
+    -- [[Muscle Mathers' world tour has been canceled due to low ticket sales. Tithes are now being accepted as condolences. - Rebecca from HR]],
     [[Your login has been recorded for quality and training purposes.]],
     [[This message is a gentle reminder. The next one will not be.]],
     [[Jonathan Deeprun has been named Employer of the Year by a committee of Jonathan Deeprun.]],
     [[Hiding gold on your alts is not a loophole. I have a list. - Rebecca from HR]],
     [[Deeprun Freight Co. would like to apologize for last week's incident on the tram. There was no incident on the tram. -Legal]],
+    [[Due to recent events Mr. Mathers will not be our entertainment for the Holiday party this year. - Rebecca from HR]],
+    [[Legal Notice: All tickets to the recent CANCELED Muscle Mathers show can be discarded...]],
+    [[Deeprun Tram is now offering premium tickets which offer priority boarding!.. IF you don't miss the jump.]],
+    [[All branding deals and projects with Muscle Mathers have been hereby CANCELED. - Legal]],
+    [[]]
+}
+
+
+-- Only in the running when the player has a spell rank they could learn right now.
+-- %s is the spell, like "Frostbolt (Rank 4)".
+local spell_ranks = {
+    [[Training records show you have not learned %s. Untrained employees are a liability. - Rebecca from HR]],
+    [[Your skills review is overdue. %s is waiting at your trainer. - Rebecca from HR]],
+    [[Reminder: %s is covered under your training plan. However you have not met your deductible..]],
 }
 
 
@@ -76,6 +91,133 @@ local commercial = {
     [[Ask your Guild Master if Tithe is right for you. It is.]],
     [[Deeprun Freight Co. We know where you hearth.]],
 }
+
+
+------------------------------------------------------------
+-- Class trainer records
+------------------------------------------------------------
+
+-- trainer_table (saved, account wide) maps a character to the spell ranks their
+-- class trainer offered that they hadn't learned on their last visit:
+--   trainer_table["Name"] = { { name = "Frostbolt", rank = "Rank 4", level = 20 }, ... }
+-- Rebuilt on every visit and every purchase. Later, anything with level <= the
+-- player's level is something they could learn right now.
+
+local trainer_open = false
+local scan_pending = false
+
+
+local function scan_trainer()
+    scan_pending = false
+
+    if not trainer_open or IsTradeskillTrainer() then
+        return
+    end
+
+    -- Hidden entries aren't listed, so make sure the ones we need are showing.
+    -- Only touched when off, so once they're on this doesn't fire TRAINER_UPDATE again.
+    if not GetTrainerServiceTypeFilter("available") then
+        SetTrainerServiceTypeFilter("available", 1)
+    end
+    if not GetTrainerServiceTypeFilter("unavailable") then
+        SetTrainerServiceTypeFilter("unavailable", 1)
+    end
+
+    local unlearned = {}
+
+    for i = 1, GetNumTrainerServices() do
+        local name, rank, service_type, is_expanded = GetTrainerServiceInfo(i)
+
+        if service_type == "header" and not is_expanded then
+            -- A collapsed section hides its spells. Open them all and scan again.
+            ExpandTrainerSkillLine(0)
+            return
+        end
+
+        if service_type == "available" or service_type == "unavailable" then
+            table.insert(unlearned, {
+                name = name,
+                rank = rank,
+                level = GetTrainerServiceLevelReq(i) or 0,
+            })
+        end
+    end
+
+    trainer_table = trainer_table or {}
+    trainer_table[GetUnitName("player", true)] = unlearned
+end
+
+
+-- TRAINER_UPDATE can come in bursts, so scan once on the next frame
+local function queue_scan()
+    if not scan_pending then
+        scan_pending = true
+        C_Timer.After(0, scan_trainer)
+    end
+end
+
+
+local trainer_frame = CreateFrame("Frame")
+trainer_frame:RegisterEvent("TRAINER_SHOW")
+trainer_frame:RegisterEvent("TRAINER_UPDATE")
+trainer_frame:RegisterEvent("TRAINER_CLOSED")
+
+trainer_frame:SetScript("OnEvent", function(self, event)
+    if event == "TRAINER_SHOW" then
+        trainer_open = true
+        queue_scan()
+    elseif event == "TRAINER_UPDATE" then
+        queue_scan()
+    elseif event == "TRAINER_CLOSED" then
+        trainer_open = false
+    end
+end)
+
+
+-- Spell ranks this character could learn right now but hasn't
+local function learnable_spell_ranks()
+    local learnable = {}
+    local unlearned = trainer_table and trainer_table[GetUnitName("player", true)]
+
+    if unlearned then
+        local player_level = UnitLevel("player")
+
+        for _, spell in ipairs(unlearned) do
+            if spell.level <= player_level then
+                table.insert(learnable, spell)
+            end
+        end
+    end
+
+    return learnable
+end
+
+
+------------------------------------------------------------
+-- Building the login message
+------------------------------------------------------------
+
+-- Every message this player could get today: the usual ones, plus any that
+-- only apply to them. One is picked at random from the lot.
+local function build_content_list()
+    local content = {}
+
+    for _, message in ipairs(login_messages) do
+        table.insert(content, message)
+    end
+
+    local learnable = learnable_spell_ranks()
+    if #learnable > 0 then
+        local spell = learnable[math.random(#learnable)]
+        local spell_text = spell.rank ~= "" and (spell.name .. " (" .. spell.rank .. ")") or spell.name
+
+        for _, message in ipairs(spell_ranks) do
+            table.insert(content, string.format(message, spell_text))
+        end
+    end
+
+    return content
+end
 
 
 local function print_tithe_line(text)
@@ -156,7 +298,9 @@ end
 -- and the message under it. It unrolls from the middle, a glint runs along each line,
 -- the words fade in, it stays long enough to read, then fades away.
 -- It takes no clicks and can't be moved, so it never gets in the way.
-local function show_memo(text)
+-- The band grows to fit the text. seconds_to_read is optional: leave it out and
+-- the memo stays up longer the longer the text is.
+local function show_memo(text, seconds_to_read)
     local banner = CreateFrame("Frame", nil, UIParent)
     banner:SetWidth(900)
     banner:SetPoint("CENTER", UIParent, "CENTER", 0, 230)
@@ -188,7 +332,7 @@ local function show_memo(text)
     add_glint(banner, "BOTTOM", 300, -300)
 
     -- Longer messages stay up longer: 4 seconds, plus a second for every 20 letters
-    local seconds_to_read = 4 + #text / 20
+    seconds_to_read = seconds_to_read or (4 + #text / 20)
 
     local show = banner:CreateAnimationGroup()
     show:SetToFinalAlpha(true)
@@ -230,6 +374,9 @@ local function show_memo(text)
     words_appear:Play()
 end
 
+shared.showMemo = show_memo
+shared.printTitheLine = print_tithe_line
+
 
 -- After the loading screen, on login and /reload but not when zoning.
 -- A moment's wait so it doesn't land while the screen is still settling.
@@ -242,11 +389,12 @@ login_messages_frame:SetScript("OnEvent", function(self, event, is_initial_login
     end
 
     C_Timer.After(2, function()
-        if math.random(commercial_odds) == commercial_odds then
+        if commercial_enabled and math.random(commercial_odds) == commercial_odds then
             show_memo("Please enjoy this message from our sponsors.")
             print_commercial()
         else
-            local login_message = login_messages[math.random(#login_messages)]
+            local content = build_content_list()
+            local login_message = content[math.random(#content)]
             show_memo(login_message)
             print_tithe_line(login_message)
         end

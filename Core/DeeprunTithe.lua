@@ -159,6 +159,16 @@ local function amount_owed()
     return math.floor(guild_debt * shared.tithe_rate)
 end
 
+shared.amountOwed = amount_owed
+
+
+-- When this character last paid a tithe, or 0 if never.
+-- The queue holds the newest rows until a ledger confirms them, then they move to the archive.
+function shared.lastTitheTime()
+    local newest = tithe_queue[#tithe_queue] or tithe_archive[#tithe_archive]
+    return newest and newest.time or 0
+end
+
 
 -- Puts what you owe on the Pay Tithe buttons and in the bags
 local function show_amount_owed()
@@ -285,6 +295,7 @@ local function pay_tithe(copper)
     DepositGuildBankMoney(copper)
     pay_off_debt(copper)
     record_deposit(copper)
+    shared.recordTitheHistory(copper)
     show_amount_owed()
     shared.celebrateTithe(copper)
     return true
