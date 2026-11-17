@@ -1,0 +1,27 @@
+# Pushing a tag like v1.0.1 packages the add-on, makes a GitHub release,
+# and uploads to CurseForge. The project ID comes from DeeprunTithe.toc.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    # The packager reads CF_API_KEY and GITHUB_OAUTH. The secret keeps its own name.
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_TOKEN }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: BigWigsMods/packager@v2
