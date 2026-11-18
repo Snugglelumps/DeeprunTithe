@@ -443,16 +443,42 @@ function shared.startWinnersTicker()
 end
 
 
--- WIN from the answering ledger: last week's top 3, all in one message
+-- The same week, and the same players with the same gold in the same order
+local function same_winners(first, second)
+    if first.week_start ~= second.week_start or #first.players ~= #second.players then
+        return false
+    end
+
+    for player_number, player in ipairs(first.players) do
+        local other = second.players[player_number]
+
+        if player.name ~= other.name or player.week_gold ~= other.week_gold then
+            return false
+        end
+    end
+
+    return true
+end
+
+
+-- WIN from the answering ledger: last week's top 3, all in one message.
+-- Every board starts with one, so they come whenever anyone pays or logs in, nearly always
+-- with the same winners. Those change nothing, so the tape keeps scrolling.
 function shared.saveWinners(message)
     local message_type, week_start, entries = strsplit("|", message)
 
-    tithe_last_week = { week_start = tonumber(week_start), players = {} }
+    local winners = { week_start = tonumber(week_start), players = {} }
 
     for entry in string.gmatch(entries or "", "[^;]+") do
         local name, week_gold = strsplit(",", entry)
-        table.insert(tithe_last_week.players, { name = name, week_gold = tonumber(week_gold) })
+        table.insert(winners.players, { name = name, week_gold = tonumber(week_gold) })
     end
+
+    if same_winners(winners, tithe_last_week) then
+        return
+    end
+
+    tithe_last_week = winners
 
     -- The planned tape may name a winner that's gone, so start over with the new ones
     if band ~= nil and band:IsVisible() then
