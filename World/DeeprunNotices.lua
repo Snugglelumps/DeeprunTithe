@@ -1,6 +1,6 @@
--- Deeprun Tithe: the tithe reminder
+-- Deeprun Tithe: notices, the reminder when you haven't paid
 -- Meant to catch someone who has actually forgotten, and never to nag.
--- After the character has been logged in for an hour, a cryptic memo shows if:
+-- After the character has been logged in for an hour, a cryptic notice shows if:
 --   it's been a day or more since our last contact (see last_contact)
 --   they owe at least their level in silver: 25 silver at level 25
 --   they're out of combat (if they're fighting, it waits until they stop)
@@ -23,7 +23,7 @@ local minutes_logged_in = 60
 local hours_between_contact = 24
 
 
-local tithe_reminders = {
+local notices = {
     [[We noticed.]],
     [[Someone was asking about you at the bank.]],
     [[The collectors have your scent.]],
@@ -66,9 +66,15 @@ local function check_reminder()
 
     tithe_reminder.last_reminder = GetServerTime()
 
-    local reminder = tithe_reminders[math.random(#tithe_reminders)]
-    shared.showMemo(reminder)
-    shared.printTitheLine(reminder)
+    shared.showNotice(notices[math.random(#notices)])
+end
+
+
+-- DEBUG: /notice shows a random notice right away, to check how it looks.
+-- Display only: it doesn't count as a reminder, so the real one still comes when it's due.
+SLASH_DEEPRUNNOTICE1 = "/notice"
+SlashCmdList.DEEPRUNNOTICE = function()
+    shared.showNotice(notices[math.random(#notices)])
 end
 
 

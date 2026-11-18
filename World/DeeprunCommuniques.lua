@@ -1,7 +1,7 @@
--- Deeprun Tithe: company lore, unlocked by paying tithes
+-- Deeprun Tithe: communiques, company lore unlocked by paying tithes
 -- Every tithe is written to an account-wide history. After a payment, if the account
 -- meets the next rank's requirements, a roll decides whether it ascends. A new rank
--- shows its lore as a memo a few seconds later. Ranks only ever go up, one at a time.
+-- shows its lore as a communique a few seconds later. Ranks only ever go up, one at a time.
 --
 -- Saved for the account (see DeeprunTithe.toc):
 --   tithe_history = {
@@ -107,7 +107,7 @@ local function meets_requirements(rank)
 end
 
 
--- The fog rolls in first, the memo appears in it, and the fog lifts as the memo fades
+-- The fog rolls in first, the communique appears in it, and the fog lifts as it fades
 local function display_lore(rank)
     local text = lore[rank]
     local seconds_to_read = 4 + #text / 20
@@ -116,8 +116,7 @@ local function display_lore(rank)
     shared.showFog(fog_head_start + seconds_to_read)
 
     C_Timer.After(fog_head_start, function()
-        shared.showMemo(text, seconds_to_read)
-        shared.printTitheLine(text)
+        shared.showBanner("COMMUNIQUE", text, seconds_to_read)
     end)
 end
 

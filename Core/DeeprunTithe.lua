@@ -17,8 +17,8 @@ local last_rdy_time = 0        -- GetTime() when a ledger last said RDY
 local waiting_for_ack = nil    -- the transactionID sent and not yet ACKed
 local sent_time = 0            -- GetTime() when that row was sent
 
--- Vendor value of the grays in your bags when the vendor opened
-local gray_value_at_vendor_open = 0
+-- How many of each grey were in your bags when the vendor opened: { [item_id] = count }
+local gray_counts_at_vendor_open = {}
 
 -- One of each per window: Blizzard's, and any bag addon's that replaces it (DeeprunBagAddons.lua)
 local pay_tithe_buttons = {}   -- the Pay Tithe button on each guild bank window
@@ -34,39 +34,22 @@ local rules_popup = nil
 -- Debt
 ------------------------------------------------------------
 
--- The tithe is on income from selling junk. WoW has no "you sold this" event,
--- so we count the grays in your bags when a vendor opens and again when it closes.
--- Whatever's gone was sold. Whatever's new was bought back.
--- Tradeoff: deleting a gray while a vendor is open counts as selling it.
+-- The tithe is on income from selling junk you looted. WoW has no "you sold this" event,
+-- so we count each grey in your bags when a vendor opens and again when it closes.
+-- Whatever's gone was sold, and counts only if it's on the looted list (DeeprunLoot.lua).
+-- Selling and buying back at the same visit cancels out. A grey bought back from an earlier
+-- visit changes nothing: it came off the list when it was sold, so selling it again won't count twice.
+-- Tradeoff: deleting a grey while a vendor is open counts as selling it.
+local function add_gray_sales_to_debt()
+    local gray_counts_now = shared.grayCountsInBags()
 
--- Vendor value of every gray in your bags
-local function gray_value_in_bags()
-    local total = 0
+    for item_id, count_at_open in pairs(gray_counts_at_vendor_open) do
+        local sold_count = count_at_open - (gray_counts_now[item_id] or 0)
 
-    for bag = 0, NUM_BAG_SLOTS do
-        for slot = 1, C_Container.GetContainerNumSlots(bag) do
-            local info = C_Container.GetContainerItemInfo(bag, slot)
-
-            if info ~= nil and info.quality == Enum.ItemQuality.Poor then
-                local vendor_price = select(11, C_Item.GetItemInfo(info.itemID))
-                total = total + vendor_price * info.stackCount
-            end
+        if sold_count > 0 then
+            guild_debt = guild_debt + shared.takeLootedGrays(item_id, sold_count)
         end
     end
-
-    return total
-end
-
-
-local function add_gray_sales_to_debt()
-    if UnitLevel("player") < shared.tithes_start_at_level then
-        return
-    end
-
-    -- Buying a gray back makes this negative, which takes it back off.
-    -- Otherwise selling, buying back and selling again later would tax it twice.
-    local gray_value_sold = gray_value_at_vendor_open - gray_value_in_bags()
-    guild_debt = math.max(0, guild_debt + gray_value_sold)
 end
 
 
@@ -264,8 +247,9 @@ local function officer_set_owed(message, sender)
         last_command_time = command_time
         show_amount_owed()
 
-        print("|TInterface\\MoneyFrame\\UI-GoldIcon:0|t |cffffd100DeeprunTithe|r: "
-            .. Ambiguate(sender, "none") .. " set your tithe to " .. GetMoneyString(owed) .. ".")
+        -- Tithe stays out of chat. This shows top centre, where Blizzard's own messages go.
+        UIErrorsFrame:AddMessage(Ambiguate(sender, "none") .. " set your tithe to " .. GetMoneyString(owed) .. ".",
+            1, 0.82, 0)
     end
 
     send(shared.dneMessage(player, command_time))
@@ -288,7 +272,8 @@ end
 -- True if it paid.
 local function pay_tithe(copper)
     if GetMoney() < copper then
-        print("Deeprun Tithe: you don't have that much gold.")
+        -- Red, top centre, like Blizzard's own "not enough money"
+        UIErrorsFrame:AddMessage("You don't have that much gold.", 1, 0.1, 0.1)
         return false
     end
 
@@ -879,7 +864,7 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
 
     -- The vendor opens and closes through the interaction manager
     elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and ... == Enum.PlayerInteractionType.Merchant then
-        gray_value_at_vendor_open = gray_value_in_bags()
+        gray_counts_at_vendor_open = shared.grayCountsInBags()
 
     elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and ... == Enum.PlayerInteractionType.Merchant then
         add_gray_sales_to_debt()
