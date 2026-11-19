@@ -4,8 +4,9 @@
 --   COMMUNIQUE  communiques, earned by paying (World/DeeprunCommuniques.lua)
 -- Notices are the back room, so they have their own darker look (Chrome/DeeprunNotice.lua).
 --
--- shared.showBanner(kind, text, seconds_to_read)
+-- shared.showBanner(kind, text, seconds_to_read, when_gone)
 --   seconds_to_read is optional: leave it out and longer text stays up longer.
+--   when_gone is optional: called once the banner has faded away.
 
 local addon_name, shared = ...
 
@@ -71,7 +72,7 @@ end
 -- the words fade in, it stays long enough to read, then fades away.
 -- It takes no clicks and can't be moved, so it never gets in the way.
 -- The band grows to fit the text.
-function shared.showBanner(kind, text, seconds_to_read)
+function shared.showBanner(kind, text, seconds_to_read, when_gone)
     local banner = CreateFrame("Frame", nil, UIParent)
     banner:SetWidth(900)
     banner:SetPoint("CENTER", UIParent, "CENTER", 0, 230)
@@ -131,6 +132,9 @@ function shared.showBanner(kind, text, seconds_to_read)
 
     show:SetScript("OnFinished", function()
         banner:Hide()
+        if when_gone then
+            when_gone()
+        end
     end)
 
     local words_appear = words:CreateAnimationGroup()

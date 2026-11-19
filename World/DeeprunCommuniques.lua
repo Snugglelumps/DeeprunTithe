@@ -9,15 +9,19 @@
 --       total = copper,                         every payment added up
 --       lore_rank = 0,                          the highest lore shown so far
 --   }
+-- The rank is raised at payment, so a communique must never be dropped: if a memo or
+-- notice is on screen when it's due, it waits 30 seconds and looks again.
+--
 -- Each payment is two numbers, so even thousands of them are a few kilobytes,
 -- and the checks below only run once per payment.
 
 local addon_name, shared = ...
 
 -- Settings
-local lore_delay_seconds = 10   -- after the payment, before the memo shows
+local lore_delay_seconds = 10   -- after the payment, before the communique shows
+local busy_retry_seconds = 30
 -- Once the next rank is earned, each payment has a 1 in <rank> chance to ascend:
--- 1 in 2 for rank 2, up to 1 in 5 for rank 5.
+-- 1 in 2 for rank 2, up to 1 in 7 for rank 7.
 
 
 local lore = {
@@ -26,6 +30,8 @@ local lore = {
     [[You have ascended to level 3 in your guild tithe payments. Jonathan Deeprun was once a mortal just like you. It’s common knowledge that the business world is cutthroat, and only the toughest and most ruthless can make it in this ever-changing world. Jonathan, in his thirst for power, was the most ruthless of all.]],
     [[You have ascended to level 4 in your guild tithe payments. You should take this moment to reflect on all you have achieved, and what you have sacrificed to make those achievements. Sacrifice. Jonathan Deeprun knows of sacrifice. All too well. You need only look at what he has achieved to begin to ponder the scale of his sacrifice. There is a reason he is feared by kings and men alike. There is reason YOU should fear.]],
     [[You have ascended to level 5 in your guild tithe payments. In level 4, is was said that you should fear. But know that Jonathan Deeprun also looks after those who contribute to his empire. As he punishes those who would stand against him, he is also magnanimous to his followers. Bathing in his presence alone is said to be more refreshing than a full night’s rest.]],
+    [[You have ascended to level 6 in your guild tithe payments. You’ll be happy to know that you are almost at level 7, where you no longer risk being ritualistically sacrificed to appease Jonathan Deeprun’s ever-growing thirst for blood! With only one more level, you’ll (most likely) be under the official protection of Jonathan Deeprun. Know that this is the most dangerous time for you. Running will not save you. Keep your head down, and you would do well to ascend again quickly.]],
+    [[You have ascended to level 7 in your guild tithe payments. You have received Jonathan’s favor and protection. …From sacrifice in guild internal activities at least. We do occasionally call upon members to appease the dark ones that thrive in the plane between this and the next, keeping general exposure to their horrors to a minimum. We ask that you do not concern yourself with such matters, simply that you remain aware of their existence. Warning: This will make you a target going forward.]],
 }
 
 
@@ -40,6 +46,8 @@ local requirements = {
     [3] = { days = 21, gold = 15,  streak = 4, payments = 10 },
     [4] = { days = 42, gold = 100, streak = 5 },
     [5] = { days = 90, gold = 200, streak = 3, within = 30 },
+    [6] = { days = 120, gold = 300, streak = 5, within = 30 },
+    [7] = { days = 150, gold = 400, streak = 7, within = 30 },
 }
 
 local seconds_per_day = 86400
@@ -113,33 +121,33 @@ local function display_lore(rank)
     local seconds_to_read = 4 + #text / 20
     local fog_head_start = 1.5
 
+    shared.communique_showing = true
     shared.showFog(fog_head_start + seconds_to_read)
 
     C_Timer.After(fog_head_start, function()
-        shared.showBanner("COMMUNIQUE", text, seconds_to_read)
+        shared.showBanner("COMMUNIQUE", text, seconds_to_read, function()
+            shared.communique_showing = false
+        end)
     end)
+end
+
+
+local function display_lore_when_clear(rank)
+    if shared.memo_showing or shared.notice_showing then
+        C_Timer.After(busy_retry_seconds, function()
+            display_lore_when_clear(rank)
+        end)
+        return
+    end
+
+    display_lore(rank)
 end
 
 
 local function show_lore(rank)
     C_Timer.After(lore_delay_seconds, function()
-        display_lore(rank)
+        display_lore_when_clear(rank)
     end)
-end
-
-
--- DEBUG: remove before release.
--- /lore 1-5 plays that rank's lore right away. Display only: the rank isn't changed.
-SLASH_DEEPRUNLORE1 = "/lore"
-SlashCmdList.DEEPRUNLORE = function(message)
-    local rank = tonumber(message)
-
-    if rank == nil or lore[rank] == nil then
-        print("Deeprun Tithe (debug): /lore 1-" .. #lore)
-        return
-    end
-
-    display_lore(rank)
 end
 
 

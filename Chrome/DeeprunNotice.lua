@@ -6,7 +6,7 @@
 -- of the screen darken while it's up. Then it all sinks back to black.
 -- Takes no clicks, like the memo.
 --
--- shared.showNotice(text)
+-- shared.showNotice(text, when_gone)   when_gone is optional: called once it has sunk away
 
 local addon_name, shared = ...
 
@@ -24,7 +24,7 @@ local shadow_depth = 0.30             -- how far in the edges reach, as a share 
 
 
 -- Rises in, holds, sinks out, then hides
-local function rise_hold_sink(frame, hold_seconds)
+local function rise_hold_sink(frame, hold_seconds, when_gone)
     local show = frame:CreateAnimationGroup()
     show:SetToFinalAlpha(true)
 
@@ -45,6 +45,9 @@ local function rise_hold_sink(frame, hold_seconds)
 
     show:SetScript("OnFinished", function()
         frame:Hide()
+        if when_gone then
+            when_gone()
+        end
     end)
 
     show:Play()
@@ -117,7 +120,7 @@ local function write_out(banner, message, text)
 end
 
 
-function shared.showNotice(text)
+function shared.showNotice(text, when_gone)
     -- It writes itself out, then stays long enough to read again
     local writing_seconds = typing_waits_seconds + (#text + fade_letters) / letters_per_second
     local hold_seconds = writing_seconds + 2.5 + #text / 20
@@ -146,6 +149,6 @@ function shared.showNotice(text)
     shared.addFadingStrip(banner, "BOTTOM", 1.5, crimson[1], crimson[2], crimson[3], 0.9)
 
     show_shadow(hold_seconds)
-    rise_hold_sink(banner, hold_seconds)
+    rise_hold_sink(banner, hold_seconds, when_gone)
     write_out(banner, message, text)
 end

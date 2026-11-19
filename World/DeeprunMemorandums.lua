@@ -3,6 +3,9 @@
 -- Once in a while, the commercial instead.
 -- The other two kinds: notices when you haven't paid (DeeprunNotices.lua), and
 -- communiques earned by paying (DeeprunCommuniques.lua).
+-- Only one of the three is on screen at a time. Each raises its flag while it shows:
+--   shared.memo_showing, shared.notice_showing, shared.communique_showing
+-- If another is up, a memo just doesn't show. It's only flavour, there's another next login.
 
 local addon_name, shared = ...
 
@@ -237,6 +240,10 @@ end
 -- After the loading screen, on login and /reload but not when zoning.
 -- A moment's wait so it doesn't land while the screen is still settling.
 -- Banner only. Nothing goes in chat at login, except the commercial, which is chat by nature.
+local function memo_gone()
+    shared.memo_showing = false
+end
+
 local memorandum_frame = CreateFrame("Frame")
 memorandum_frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
@@ -246,12 +253,18 @@ memorandum_frame:SetScript("OnEvent", function(self, event, is_initial_login, is
     end
 
     C_Timer.After(2, function()
+        if shared.notice_showing or shared.communique_showing then
+            return
+        end
+
+        shared.memo_showing = true
+
         if commercial_enabled and math.random(commercial_odds) == commercial_odds then
-            shared.showBanner("MEMO", "Please enjoy this message from our sponsors.")
+            shared.showBanner("MEMO", "Please enjoy this message from our sponsors.", nil, memo_gone)
             print_commercial()
         else
             local content = build_content_list()
-            shared.showBanner("MEMO", content[math.random(#content)])
+            shared.showBanner("MEMO", content[math.random(#content)], nil, memo_gone)
         end
     end)
 end)
