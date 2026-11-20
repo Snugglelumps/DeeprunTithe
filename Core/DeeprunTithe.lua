@@ -9,6 +9,7 @@ local addon_name, shared = ...
 --   tithe_archive  deposits a ledger has confirmed, kept for exporting later
 --   last_command_time  when the newest officer's SET we've done was made, so it's done once
 --   custom_tithe_this_week  { week_start = ..., paid = copper } custom tithes paid toward the weekly limit
+--   tithe_guild    the guild this character last heard an officer's RDY in (see shared.inConfiguredGuild)
 -- Saved for the account:
 --   tithe_settings  the newest settings a ledger's RDY has brought: { time = ..., text = "r=0.05;t=0;l=20;c=1;" }
 -- A queued row: { transactionID = "time|base64", time = ..., gold = ..., item_id = ..., count = ... }
@@ -22,6 +23,7 @@ local gray_counts_at_vendor_open = {}
 
 -- One of each per window: Blizzard's, and any bag addon's that replaces it (DeeprunBagAddons.lua)
 local pay_tithe_buttons = {}   -- the Pay Tithe button on each guild bank window
+local custom_tithe_buttons = {} -- the Pay Custom Tithe button beside each one
 local rules_cards = {}         -- the rule under each tithe bar, until it's accepted
 local bag_debt_texts = {}      -- the "Tithe:" line in each bag window
 local debt_boxes = {}          -- the boxes some of those lines sit in, which grow to fit the text
@@ -153,7 +155,20 @@ function shared.lastTitheTime()
 end
 
 
--- Puts what you owe on the Pay Tithe buttons and in the bags
+-- Memos, notices, communiques and the bank's buttons are only for a guild that runs the Ledger: one where this
+-- character has heard a RDY from an officer. tithe_guild is that guild's name, saved
+-- per character, so it still counts on days no officer is online. Leave that guild and
+-- it doesn't count until a RDY comes in the new one.
+-- Just after login the guild name can be missing for a moment, which reads as not configured.
+function shared.inConfiguredGuild()
+    local guild_name = GetGuildInfo("player")
+    return guild_name ~= nil and guild_name == tithe_guild
+end
+
+
+-- Puts what you owe on the Pay Tithe buttons and in the bags.
+-- The bags always show it. Outside a guild that runs the Ledger, the bank's buttons
+-- say so and are off: a tithe there would go to a bank nobody's keeping a ledger of.
 local function show_amount_owed()
     local button_text = "All paid up"
     local bag_text = "|cffffd100Tithe:|r All paid up"
@@ -163,8 +178,18 @@ local function show_amount_owed()
         bag_text = "|cffffd100Tithe:|r " .. GetMoneyString(amount_owed())
     end
 
+    local configured = shared.inConfiguredGuild()
+    if not configured then
+        button_text = "This guild doesn't collect tithes"
+    end
+
     for _, pay_tithe_button in ipairs(pay_tithe_buttons) do
         pay_tithe_button:SetText(button_text)
+        pay_tithe_button:SetEnabled(configured)
+    end
+
+    for _, custom_tithe_button in ipairs(custom_tithe_buttons) do
+        custom_tithe_button:SetEnabled(configured)
     end
 
     for _, bag_debt_text in ipairs(bag_debt_texts) do
@@ -207,22 +232,6 @@ end
 -- Officers setting what you owe
 ------------------------------------------------------------
 
--- Anyone can send an addon message, so the sender has to be the Guild Master or an officer.
--- Their rank comes from the guild roster, which can't be faked.
--- Someone not in the roster yet is turned down. Their ledger sends again in 5 minutes.
-local function sent_by_officer(sender)
-    for member_number = 1, GetNumGuildMembers() do
-        local name, rank_name, rank_index = GetGuildRosterInfo(member_number)
-
-        if Ambiguate(name, "none") == Ambiguate(sender, "none") then
-            return rank_index <= 1
-        end
-    end
-
-    return false
-end
-
-
 -- SET from an officer's ledger: what you owe becomes their number.
 -- Their ledger keeps sending it until we say DNE, so a resend, or an older one
 -- arriving late, is only answered. last_command_time is the newest one done.
@@ -233,7 +242,10 @@ local function officer_set_owed(message, sender)
         return
     end
 
-    if not sent_by_officer(sender) then
+    -- Anyone can send an addon message, so the sender has to be in the top three ranks
+    -- (shared.ledger_names in DeeprunShared.lua). Someone not on the list yet is turned down.
+    -- Their ledger sends again in 5 minutes.
+    if not shared.sentByLedgerRank(sender) then
         return
     end
 
@@ -663,6 +675,7 @@ local function create_tithe_bar(bank_window)
     custom_button:SetPoint("BOTTOMRIGHT")
     custom_button:SetText("Pay Custom Tithe")
     custom_button:SetScript("OnClick", show_custom_tithe_frame)
+    table.insert(custom_tithe_buttons, custom_button)
 
     -- A 4 pixel gap between them so they don't touch
     local pay_tithe_button = make_bar_button(tithe_bar)
@@ -779,7 +792,12 @@ end
 local function listen(message, sender)
     local message_type = strsplit("|", message)
 
-    if message_type == "RDY" then
+    if message_type == "RDY" and shared.sentByLedgerRank(sender) then
+        -- An officer's RDY: this guild runs the Ledger. Turns the bank's buttons on if it's new.
+        if tithe_guild ~= GetGuildInfo("player") then
+            tithe_guild = GetGuildInfo("player")
+            show_amount_owed()
+        end
         ledger_ready(message)
         shared.askForBoardIfNoneYet()
         shared.sendAccountID()
@@ -793,11 +811,11 @@ local function listen(message, sender)
         officer_set_owed(message, sender)
     end
 
-    if message_type == "RNK" then
+    if message_type == "RNK" and shared.sentByLedgerRank(sender) then
         shared.saveRanks(message)
     end
 
-    if message_type == "WIN" then
+    if message_type == "WIN" and shared.sentByLedgerRank(sender) then
         shared.saveWinners(message)
     end
 end

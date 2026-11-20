@@ -1,11 +1,23 @@
 -- Deeprun Tithe: memorandums, the company memo at login
--- One random memorandum each login, in the banner (Chrome/DeeprunBanner.lua).
--- Once in a while, the commercial instead.
+-- One memo a day, account wide: the first login or reload of the day deals the next memo off
+-- a shuffled deck, in the banner (Chrome/DeeprunBanner.lua). The day changes at midnight.
+-- Every memo shows once before any repeats. Once in a while, the commercial instead.
+--
+-- Saved for the account (see DeeprunTithe.toc):
+--   memo_deck = {
+--       cards = { 12, 3, -1, 40, ... },  memos left in the deck, next one first
+--       last_day = "2026-11-19",         the last day a memo was shown, so it's once a day
+--   }
+-- A card is a memo's number in memorandums. Negative cards are the spell rank memos:
+-- -1 is spell_ranks[1]. One drawn when there's no spell rank to nag about is thrown away.
+-- New memos join the deck at the next shuffle.
+--
 -- The other two kinds: notices when you haven't paid (DeeprunNotices.lua), and
 -- communiques earned by paying (DeeprunCommuniques.lua).
 -- Only one of the three is on screen at a time. Each raises its flag while it shows:
 --   shared.memo_showing, shared.notice_showing, shared.communique_showing
--- If another is up, a memo just doesn't show. It's only flavour, there's another next login.
+-- If another is up, or we're in combat, the memo waits: today's isn't used up, so the next
+-- login or reload gets it.
 
 local addon_name, shared = ...
 
@@ -68,7 +80,6 @@ local memorandums = {
     [[Legal Notice: All tickets to the recent CANCELED Muscle Mathers show can be discarded...]],
     [[Deeprun Tram is now offering premium tickets which offer priority boarding!.. IF you don't miss the jump.]],
     [[All branding deals and projects with Muscle Mathers have been hereby CANCELED. - Legal]],
-    [[]]
 }
 
 
@@ -203,26 +214,71 @@ end
 -- Picking the memorandum
 ------------------------------------------------------------
 
--- Every message this player could get today: the usual ones, plus any that
--- only apply to them. One is picked at random from the lot.
-local function build_content_list()
-    local content = {}
+-- Every memo and spell rank memo, in a random order
+local function shuffled_deck()
+    local cards = {}
 
-    for _, message in ipairs(memorandums) do
-        table.insert(content, message)
+    for memo_number = 1, #memorandums do
+        table.insert(cards, memo_number)
+    end
+
+    for spell_memo_number = 1, #spell_ranks do
+        table.insert(cards, -spell_memo_number)
+    end
+
+    -- Swap each card with a random one at or before it, from the back of the deck to the front
+    for card_number = #cards, 2, -1 do
+        local other_number = math.random(card_number)
+        cards[card_number], cards[other_number] = cards[other_number], cards[card_number]
+    end
+
+    return cards
+end
+
+
+-- A card's text, or nil if it doesn't apply right now.
+-- A memo removed since the deck was shuffled is nil too.
+local function card_text(card)
+    if card > 0 then
+        return memorandums[card]
+    end
+
+    if spell_ranks[-card] == nil then
+        return nil
     end
 
     local learnable = learnable_spell_ranks()
-    if #learnable > 0 then
-        local spell = learnable[math.random(#learnable)]
-        local spell_text = spell.rank ~= "" and (spell.name .. " (" .. spell.rank .. ")") or spell.name
 
-        for _, message in ipairs(spell_ranks) do
-            table.insert(content, string.format(message, spell_text))
-        end
+    if #learnable == 0 then
+        return nil
     end
 
-    return content
+    local spell = learnable[math.random(#learnable)]
+    local spell_text = spell.name
+
+    if spell.rank ~= "" then
+        spell_text = spell.name .. " (" .. spell.rank .. ")"
+    end
+
+    return string.format(spell_ranks[-card], spell_text)
+end
+
+
+-- The next memo off the deck, with a fresh shuffled deck when it runs out.
+-- A card that doesn't apply right now is thrown away, and the next one is drawn.
+local function draw_memo()
+    while true do
+        if #memo_deck.cards == 0 then
+            memo_deck.cards = shuffled_deck()
+        end
+
+        local card = table.remove(memo_deck.cards, 1)
+        local text = card_text(card)
+
+        if text ~= nil then
+            return text
+        end
+    end
 end
 
 
@@ -252,19 +308,38 @@ memorandum_frame:SetScript("OnEvent", function(self, event, is_initial_login, is
         return
     end
 
+    if memo_deck == nil then
+        memo_deck = { cards = {}, last_day = "" }
+    end
+
     C_Timer.After(2, function()
+        -- Already had today's. Reloads and other characters get nothing until midnight.
+        if memo_deck.last_day == date("%Y-%m-%d") then
+            return
+        end
+
+        -- Only in a guild that runs the Ledger. Today's isn't used up, so a character in one still gets it.
+        if not shared.inConfiguredGuild() then
+            return
+        end
+
         if shared.notice_showing or shared.communique_showing then
             return
         end
 
+        -- Never in combat. Today's isn't used up, so the next login or reload gets it.
+        if InCombatLockdown() or UnitAffectingCombat("player") then
+            return
+        end
+
+        memo_deck.last_day = date("%Y-%m-%d")
         shared.memo_showing = true
 
         if commercial_enabled and math.random(commercial_odds) == commercial_odds then
             shared.showBanner("MEMO", "Please enjoy this message from our sponsors.", nil, memo_gone)
             print_commercial()
         else
-            local content = build_content_list()
-            shared.showBanner("MEMO", content[math.random(#content)], nil, memo_gone)
+            shared.showBanner("MEMO", draw_memo(), nil, memo_gone)
         end
     end)
 end)

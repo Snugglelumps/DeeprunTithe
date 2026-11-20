@@ -4,7 +4,9 @@
 -- so it fogs the world and not the action bars, and a memo shows on top of it.
 -- Takes no clicks. Built from gradients, the same as the memo banner's strips.
 --
--- shared.showFog(seconds)   seconds is how long it stays at full thickness
+-- shared.showFog(seconds)       rolls in, stays this many seconds at full thickness, lifts
+-- shared.rollInFog(thickness)   rolls in and stays until liftFog. 1 is full, lower is lighter.
+-- shared.liftFog()
 
 local addon_name, shared = ...
 
@@ -111,37 +113,49 @@ local function create_fog()
     breathe(edges, 0.75, 1, 4)
     drift(edges, 30, -12, 9)
 
-    -- Roll in, hold, lift
-    fog.show = fog:CreateAnimationGroup()
-    fog.show:SetToFinalAlpha(true)
+    -- Rolling in and lifting are separate, so the fog can stay up as long as something needs it
+    fog.roll_in = fog:CreateAnimationGroup()
+    fog.roll_in:SetToFinalAlpha(true)
+    fog.roll_in_alpha = fog.roll_in:CreateAnimation("Alpha")
+    fog.roll_in_alpha:SetFromAlpha(0)
+    fog.roll_in_alpha:SetDuration(roll_in_seconds)
+    fog.roll_in_alpha:SetSmoothing("IN")
 
-    local roll_in = fog.show:CreateAnimation("Alpha")
-    roll_in:SetFromAlpha(0)
-    roll_in:SetToAlpha(1)
-    roll_in:SetDuration(roll_in_seconds)
-    roll_in:SetSmoothing("IN")
-    roll_in:SetOrder(1)
+    fog.lift = fog:CreateAnimationGroup()
+    fog.lift:SetToFinalAlpha(true)
+    fog.lift_alpha = fog.lift:CreateAnimation("Alpha")
+    fog.lift_alpha:SetToAlpha(0)
+    fog.lift_alpha:SetDuration(lift_seconds)
+    fog.lift_alpha:SetSmoothing("OUT")
 
-    fog.lift = fog.show:CreateAnimation("Alpha")
-    fog.lift:SetFromAlpha(1)
-    fog.lift:SetToAlpha(0)
-    fog.lift:SetDuration(lift_seconds)
-    fog.lift:SetSmoothing("OUT")
-    fog.lift:SetOrder(2)
-
-    fog.show:SetScript("OnFinished", function()
+    fog.lift:SetScript("OnFinished", function()
         fog:Hide()
     end)
 end
 
 
-function shared.showFog(seconds)
+-- Lifting while it's still rolling in jumps to full thickness first, then lifts.
+-- Only happens if it's lifted in the first couple of seconds, so it's left as it is.
+function shared.rollInFog(thickness)
     if fog == nil then
         create_fog()
     end
 
-    fog.show:Stop()
-    fog.lift:SetStartDelay(seconds)
+    fog.lift:Stop()
+    fog.roll_in_alpha:SetToAlpha(thickness)
+    fog.lift_alpha:SetFromAlpha(thickness)
     fog:Show()
-    fog.show:Play()
+    fog.roll_in:Play()
+end
+
+
+function shared.liftFog()
+    fog.roll_in:Stop()
+    fog.lift:Play()
+end
+
+
+function shared.showFog(seconds)
+    shared.rollInFog(1)
+    C_Timer.After(roll_in_seconds + seconds, shared.liftFog)
 end

@@ -1,12 +1,18 @@
 -- Deeprun Tithe: notices, the reminder when you haven't paid
 -- Meant to catch someone who has actually forgotten, and never to nag.
 -- After the character has been logged in for an hour, a cryptic notice shows if:
+--   they're in a guild that runs the Ledger (shared.inConfiguredGuild)
 --   it's been a day or more since our last contact (see last_contact)
 --   they owe at least their level in silver: 25 silver at level 25
 --   they're out of combat (if they're fighting, it waits until they stop)
 --   no memo or communique is on screen (if one is, it looks again in 30 seconds)
--- It checks once per session. So the most anyone sees is one reminder a day, and only
--- after an hour of play.
+-- It checks once per session. So the most anyone sees is one reminder every two days,
+-- and only after an hour of play.
+--
+-- Outside a guild that runs the Ledger (an alt, or no guild), the notice is one of the
+-- outsider notices instead: Deeprun calling them in. Every 3 days, the same hour in,
+-- owing or not. They share last_reminder with the reminders, so one doesn't follow
+-- right on the other's heels.
 --
 -- Saved per character (see DeeprunTithe.toc):
 --   tithe_reminder = {
@@ -21,7 +27,8 @@ local addon_name, shared = ...
 
 -- Settings
 local minutes_logged_in = 60
-local hours_between_contact = 24
+local hours_between_contact = 48
+local hours_between_outsider_notices = 72
 local busy_retry_seconds = 30
 
 
@@ -32,6 +39,17 @@ local notices = {
     [[Your tithe 'participation' has been noted.]],
     [[The vault is missing something...]],
     [[Jonathan is displeased]],
+}
+
+
+-- For someone outside Deeprun. Plainer than the ones above: they don't know us yet.
+local outsider_notices = {
+    [[You walk alone, and your coin serves no one. Deeprun Freight Co. could change that.]],
+    [[Jonathan Deeprun keeps a ledger of the faithful. Your name is not in it. Yet.]],
+    [[Somewhere, a guild bank waits for your offering. Seek out Deeprun Freight Co.]],
+    [[The members of Deeprun Freight Co. never wander without purpose. Ask one how to join.]],
+    [[You carry the Tithe, but you tithe to no one. That is a waste Jonathan cannot abide.]],
+    [[Deeprun Freight Co. has noticed you. There is a place for you among us, if you want it.]],
 }
 
 
@@ -47,7 +65,7 @@ local function reminder_due()
     local level_in_silver = UnitLevel("player") * 100
     local seconds_since_contact = GetServerTime() - last_contact()
 
-    return seconds_since_contact >= hours_between_contact * 3600 and owed >= level_in_silver
+    return shared.inConfiguredGuild() and seconds_since_contact >= hours_between_contact * 3600 and owed >= level_in_silver
 end
 
 
@@ -88,9 +106,17 @@ local function pick_notice()
 end
 
 
-local function show_random_notice()
+-- Outside a guild that runs the Ledger, every 3 days
+local function outsider_notice_due()
+    local seconds_since_last = GetServerTime() - tithe_reminder.last_reminder
+    return not shared.inConfiguredGuild() and seconds_since_last >= hours_between_outsider_notices * 3600
+end
+
+
+local function show_notice(text)
+    tithe_reminder.last_reminder = GetServerTime()
     shared.notice_showing = true
-    shared.showNotice(pick_notice(), function()
+    shared.showNotice(text, function()
         shared.notice_showing = false
     end)
 end
@@ -111,13 +137,11 @@ local function check_reminder()
 
     tithe_reminder.checked = true
 
-    if not reminder_due() then
-        return
+    if reminder_due() then
+        show_notice(pick_notice())
+    elseif outsider_notice_due() then
+        show_notice(outsider_notices[math.random(#outsider_notices)])
     end
-
-    tithe_reminder.last_reminder = GetServerTime()
-
-    show_random_notice()
 end
 
 

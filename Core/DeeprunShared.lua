@@ -12,6 +12,59 @@ shared.custom_tithe_limit = 1   -- gold a week
 
 
 ------------------------------------------------------------
+-- Who ledgers are believed from
+------------------------------------------------------------
+
+-- Anyone can send an addon message, so RDY, SBY, RNK, WIN and SET are only believed from
+-- the top ranks. Ranks come from our copy of the guild roster, which comes from the server.
+-- The Guild Master is rank 0.
+shared.ledger_lowest_rank = 2   -- the top three: 0, 1 and 2
+
+-- Everyone in those ranks: { [name] = true }. Rebuilt every time GUILD_ROSTER_UPDATE fires,
+-- so it always matches our copy of the roster.
+shared.ledger_names = {}
+
+
+local function rebuild_ledger_names()
+    shared.ledger_names = {}
+
+    for member_number = 1, GetNumGuildMembers() do
+        local name, rank_name, rank_index = GetGuildRosterInfo(member_number)
+
+        if rank_index <= shared.ledger_lowest_rank then
+            shared.ledger_names[Ambiguate(name, "none")] = true
+        end
+    end
+end
+
+
+function shared.sentByLedgerRank(sender)
+    return shared.ledger_names[Ambiguate(sender, "none")] == true
+end
+
+
+-- Keeps our copy of the roster fresh, the same way Blizzard's guild window does:
+-- ask at login, and again whenever GUILD_ROSTER_UPDATE says we can (can_request_update is true).
+-- Every time it fires, the list is rebuilt from our copy.
+local roster_frame = CreateFrame("Frame")
+roster_frame:RegisterEvent("PLAYER_LOGIN")
+roster_frame:RegisterEvent("GUILD_ROSTER_UPDATE")
+
+roster_frame:SetScript("OnEvent", function(self, event, can_request_update)
+    if event == "PLAYER_LOGIN" then
+        C_GuildInfo.GuildRoster()
+        return
+    end
+
+    if can_request_update then
+        C_GuildInfo.GuildRoster()
+    end
+
+    rebuild_ledger_names()
+end)
+
+
+------------------------------------------------------------
 -- Transaction IDs and messages
 ------------------------------------------------------------
 

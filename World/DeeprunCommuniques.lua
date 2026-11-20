@@ -152,7 +152,13 @@ end
 
 
 -- Called by pay_tithe after every payment
+-- Only in a guild that runs the Ledger: a tithe anywhere else isn't history and earns no lore.
+-- (The bank's buttons are off outside one, so this only matters if that ever changes.)
 function shared.recordTitheHistory(copper)
+    if not shared.inConfiguredGuild() then
+        return
+    end
+
     if tithe_history == nil then
         tithe_history = { payments = {}, total = 0, lore_rank = 0 }
     end

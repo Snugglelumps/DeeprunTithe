@@ -79,6 +79,21 @@ local function support_betterbags()
 end
 
 
+-- SnugUX: a copy of Blizzard's combined bags, so the line goes where it does on Blizzard's:
+-- the bottom left of the gold bar, level with your gold on the right.
+-- The window is SnugUXBags. Its gold bar has no name, so it's the child with the gold border.
+local function support_snugux()
+    for _, child in ipairs({ SnugUXBags:GetChildren() }) do
+        if child.Border ~= nil and child.Border.Left ~= nil then
+            local debt_line = shared.makeDebtLine(child)
+            debt_line:SetPoint("LEFT", child, "LEFT", 8, 0)
+            debt_line:SetFrameLevel(child.Border:GetFrameLevel() + 1)
+            return
+        end
+    end
+end
+
+
 local bag_addons_frame = CreateFrame("Frame")
 bag_addons_frame:RegisterEvent("PLAYER_LOGIN")
 
@@ -102,5 +117,9 @@ bag_addons_frame:SetScript("OnEvent", function()
 
     if C_AddOns.IsAddOnLoaded("BetterBags") then
         support_betterbags()
+    end
+
+    if C_AddOns.IsAddOnLoaded("SnugUX") then
+        support_snugux()
     end
 end)
