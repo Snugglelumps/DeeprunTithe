@@ -31,7 +31,8 @@ local function rebuild_ledger_names()
     for member_number = 1, GetNumGuildMembers() do
         local name, rank_name, rank_index = GetGuildRosterInfo(member_number)
 
-        if rank_index <= shared.ledger_lowest_rank then
+        -- Just after login some members have no name yet. The next roster update fills them in.
+        if name ~= nil and rank_index <= shared.ledger_lowest_rank then
             shared.ledger_names[Ambiguate(name, "none")] = true
         end
     end
