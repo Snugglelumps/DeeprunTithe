@@ -7,7 +7,6 @@ local addon_name, shared = ...
 --   guild_debt     full vendor value of junk sold. What you owe is guild_debt * tithe_rate.
 --   tithe_queue    deposits not yet confirmed by a ledger, oldest first
 --   tithe_archive  deposits a ledger has confirmed, kept for exporting later
---   last_command_time  when the newest officer's SET we've done was made, so it's done once
 --   custom_tithe_this_week  { week_start = ..., paid = copper } custom tithes paid toward the weekly limit
 --   tithe_guild    the guild this character last heard an officer's RDY in (see shared.inConfiguredGuild)
 -- Saved for the account:
@@ -232,9 +231,13 @@ end
 -- Officers setting what you owe
 ------------------------------------------------------------
 
--- SET from an officer's ledger: what you owe becomes their number.
--- Their ledger keeps sending it until we say DNE, so a resend, or an older one
--- arriving late, is only answered. last_command_time is the newest one done.
+-- SET from an officer's ledger: what you owe becomes their number, and we answer DNE.
+-- One try: the officer sends it once, while you're online, and sees our DNE or nothing.
+-- A SET more than a minute old is never done. It's from before whatever you've sold or
+-- paid since, so doing it would undo that. (Old ledgers resend theirs every 5 minutes,
+-- forever. Those are still answered, so they stop.)
+local set_max_age_seconds = 60
+
 local function officer_set_owed(message, sender)
     local message_type, player, command_time, owed = strsplit("|", message)
 
@@ -252,11 +255,10 @@ local function officer_set_owed(message, sender)
     command_time = tonumber(command_time)
     owed = tonumber(owed)
 
-    if command_time > last_command_time then
+    if GetServerTime() - command_time <= set_max_age_seconds then
         -- guild_debt is the vendor value before the rate. The extra half copper stops
         -- rounding turning 12345 owed into 12344.
         guild_debt = (owed + 0.5) / shared.tithe_rate
-        last_command_time = command_time
         show_amount_owed()
 
         -- Tithe stays out of chat. This shows top centre, where Blizzard's own messages go.
@@ -840,10 +842,6 @@ tithe_frame:SetScript("OnEvent", function(self, event, ...)
 
         if tithe_archive == nil then
             tithe_archive = {}
-        end
-
-        if last_command_time == nil then
-            last_command_time = 0
         end
 
         if custom_tithe_this_week == nil then

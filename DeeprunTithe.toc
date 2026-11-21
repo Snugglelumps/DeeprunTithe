@@ -7,7 +7,7 @@
 ## Version: @project-version@
 ## OptionalDeps: Baganator, Bagnon, AdiBags, ArkInventory, BetterBags, SnugUX
 ## SavedVariables: tithe_rules_accepted, tithe_settings, tithe_leaderboard, tithe_last_week, deeprun_client_id, trainer_table, tithe_history, looted_grays, memo_deck, tithe_scope_seen
-## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive, last_command_time, custom_tithe_this_week, tithe_reminder, tithe_guild
+## SavedVariablesPerCharacter: guild_debt, tithe_queue, tithe_archive, custom_tithe_this_week, tithe_reminder, tithe_guild
 
 Core\DeeprunShared.lua
 Core\DeeprunLoot.lua
