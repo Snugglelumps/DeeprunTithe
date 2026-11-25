@@ -24,9 +24,13 @@ shared.ledger_lowest_rank = 2   -- the top three: 0, 1 and 2
 -- so it always matches our copy of the roster.
 shared.ledger_names = {}
 
+-- Only the Guild Master's Ring is answered (EYE). Rank 0, from the same roster.
+shared.guild_master = nil
+
 
 local function rebuild_ledger_names()
     shared.ledger_names = {}
+    shared.guild_master = nil
 
     for member_number = 1, GetNumGuildMembers() do
         local name, rank_name, rank_index = GetGuildRosterInfo(member_number)
@@ -35,12 +39,21 @@ local function rebuild_ledger_names()
         if name ~= nil and rank_index <= shared.ledger_lowest_rank then
             shared.ledger_names[Ambiguate(name, "none")] = true
         end
+
+        if name ~= nil and rank_index == 0 then
+            shared.guild_master = Ambiguate(name, "none")
+        end
     end
 end
 
 
 function shared.sentByLedgerRank(sender)
     return shared.ledger_names[Ambiguate(sender, "none")] == true
+end
+
+
+function shared.sentByGuildMaster(sender)
+    return Ambiguate(sender, "none") == shared.guild_master
 end
 
 
@@ -167,6 +180,20 @@ end
 -- ACC|<id>, like ACC|a3f9-c01e42. The server stamps which character sent it.
 function shared.accMessage(account_id)
     return "ACC|" .. account_id
+end
+
+
+-- The Guild Master's Ring asking every tithe for its telemetry
+function shared.eyeMessage()
+    return "EYE"
+end
+
+
+-- A tithe answering EYE, whispered to whoever asked. key=value; pairs, like the settings,
+-- so a new key doesn't break an older Ring. See DeeprunTelemetry.lua for the keys.
+-- SEE|v=v1.9.0;lv=4;...
+function shared.seeMessage(telemetry)
+    return "SEE|" .. telemetry
 end
 
 

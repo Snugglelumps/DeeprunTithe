@@ -5,7 +5,7 @@
 --   it's been a day or more since our last contact (see last_contact)
 --   they owe at least their level in silver: 25 silver at level 25
 --   they're out of combat (if they're fighting, it waits until they stop)
---   no memo or communique is on screen (if one is, it looks again in 30 seconds)
+--   no memo, communique or archive is on screen (if one is, it looks again in 30 seconds)
 -- It checks once per session. So the most anyone sees is one reminder every two days,
 -- and only after an hour of play.
 --
@@ -130,7 +130,7 @@ local function check_reminder()
         return
     end
 
-    if shared.memo_showing or shared.communique_showing then
+    if shared.memo_showing or shared.communique_showing or shared.archive_showing then
         C_Timer.After(busy_retry_seconds, check_reminder)
         return
     end

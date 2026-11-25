@@ -18,9 +18,11 @@ Chrome\DeeprunFog.lua
 Chrome\DeeprunBanner.lua
 Chrome\DeeprunNotice.lua
 Chrome\DeeprunScope.lua
+Chrome\DeeprunArchive.lua
 World\DeeprunMemorandums.lua
 World\DeeprunNotices.lua
 World\DeeprunCommuniques.lua
 Core\DeeprunAccount.lua
+Core\DeeprunTelemetry.lua
 Chrome\DeeprunWinners.lua
 Chrome\DeeprunLeaderboard.lua

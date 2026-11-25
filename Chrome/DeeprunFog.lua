@@ -5,7 +5,9 @@
 -- Takes no clicks. Built from gradients, the same as the memo banner's strips.
 --
 -- shared.showFog(seconds)       rolls in, stays this many seconds at full thickness, lifts
--- shared.rollInFog(thickness)   rolls in and stays until liftFog. 1 is full, lower is lighter.
+-- shared.rollInFog(thickness, strata)
+--   rolls in and stays until liftFog. 1 is full, lower is lighter.
+--   strata is optional: the archive raises the fog over the rest of the UI.
 -- shared.liftFog()
 
 local addon_name, shared = ...
@@ -136,10 +138,12 @@ end
 
 -- Lifting while it's still rolling in jumps to full thickness first, then lifts.
 -- Only happens if it's lifted in the first couple of seconds, so it's left as it is.
-function shared.rollInFog(thickness)
+function shared.rollInFog(thickness, strata)
     if fog == nil then
         create_fog()
     end
+
+    fog:SetFrameStrata(strata or "BACKGROUND")
 
     fog.lift:Stop()
     fog.roll_in_alpha:SetToAlpha(thickness)

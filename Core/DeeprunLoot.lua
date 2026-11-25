@@ -89,6 +89,18 @@ function shared.takeLootedGrays(item_id, sold_count)
 end
 
 
+-- What every looted grey not sold yet is worth, on the whole account
+function shared.unsoldGrayValue()
+    local copper = 0
+
+    for _, entry in ipairs(looted_grays) do
+        copper = copper + entry.count * entry.price
+    end
+
+    return copper
+end
+
+
 -- How many of each grey are in your bags: { [item_id] = count }
 function shared.grayCountsInBags()
     local counts = {}

@@ -112,6 +112,16 @@ local function drain_queue()
 end
 
 
+-- For the telemetry. -1 if no ledger has said RDY since login or reload.
+function shared.secondsSinceReady()
+    if last_rdy_time == 0 then
+        return -1
+    end
+
+    return math.floor(GetTime() - last_rdy_time)
+end
+
+
 local function row_acked(message)
     if waiting_for_ack == nil then
         return
@@ -360,6 +370,8 @@ local function custom_tithe_paid_this_week()
 
     return custom_tithe_this_week.paid
 end
+
+shared.customTithePaidThisWeek = custom_tithe_paid_this_week
 
 
 local function add_custom_tithe(copper)
@@ -819,6 +831,10 @@ local function listen(message, sender)
 
     if message_type == "WIN" and shared.sentByLedgerRank(sender) then
         shared.saveWinners(message)
+    end
+
+    if message_type == "EYE" and shared.sentByGuildMaster(sender) and shared.inConfiguredGuild() then
+        shared.answerEye(sender)
     end
 end
 

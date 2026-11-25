@@ -47,6 +47,10 @@ local scope_text =
     .. "ledgers on a guild-only channel that never shows in chat. That's what fills the leaderboard, "
     .. "and how treasurers match your payment to the guild bank log.\n\n"
 
+    .. "The Guild Master can also ask your addon for its numbers: your tithe level and progress, what you owe, "
+    .. "your unsold greys, your custom tithe this week, an ID that ties your alts together, "
+    .. "and whether the addon is up to date and working.\n\n"
+
     .. "Thank you for being part of Deeprun Freight Co."
 
 

@@ -7,6 +7,9 @@
 -- The answering ledger sends it to the whole guild in RNK messages, a few players each.
 -- It's saved, so the last board still shows when no officer is online.
 --
+-- Your tithe level is the coin before the title. Clicking it opens
+-- everything you've learned so far (DeeprunArchive.lua).
+--
 -- Last week's winners scroll along the bottom in a stock ticker (DeeprunWinners.lua).
 --
 -- Saved for the account (see DeeprunTithe.toc):
@@ -17,6 +20,8 @@ local addon_name, shared = ...
 
 local leaderboard_page = nil
 local week_label = nil
+local level_button = nil
+local title = nil
 local empty_label = nil
 local scroll_child = nil
 local rows = {}
@@ -160,8 +165,67 @@ local function show_leaderboard()
 end
 
 
+-- Nothing until the first tithe, so there's nothing to open yet
+local function show_tithe_level()
+    local level = shared.titheLevel()
+    level_button.number:SetText(level)
+    level_button:SetShown(level > 0)
+
+    -- The title makes room for the coin
+    title:SetPoint("TOPLEFT", leaderboard_page, "TOPLEFT", level > 0 and 46 or 14, -12)
+end
+
+
+-- A circle of the given size in the middle of the button
+local function add_circle(button, layer, size)
+    local circle = button:CreateTexture(nil, layer)
+    circle:SetSize(size, size)
+    circle:SetPoint("CENTER")
+
+    local mask = button:CreateMaskTexture()
+    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask")
+    mask:SetAllPoints(circle)
+    circle:AddMaskTexture(mask)
+    return circle
+end
+
+
+-- A round coin with a gold rim and your level in the middle. The coin is darkened so the
+-- number stands out, and brightens on hover.
+local function create_level_button()
+    level_button = CreateFrame("Button", nil, leaderboard_page)
+    level_button:SetSize(29, 29)
+    level_button:SetPoint("TOPLEFT", leaderboard_page, "TOPLEFT", 10, -5)
+
+    local rim = add_circle(level_button, "BACKGROUND", 29)
+    rim:SetColorTexture(1, 0.82, 0)
+
+    local coin = add_circle(level_button, "ARTWORK", 26)
+    coin:SetTexture("Interface\\Icons\\INV_Misc_Coin_17")
+    coin:SetVertexColor(0.45, 0.45, 0.45)
+
+    local hover = add_circle(level_button, "HIGHLIGHT", 29)
+    hover:SetColorTexture(1, 1, 1, 0.2)
+
+    level_button.number = level_button:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    level_button.number:SetPoint("CENTER")
+
+    level_button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Tithe Level " .. shared.titheLevel())
+        GameTooltip:AddLine("Click to recall what you've learned", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    level_button:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    level_button:SetScript("OnClick", shared.showArchive)
+end
+
+
 local function show_page()
     show_leaderboard()
+    show_tithe_level()
     shared.startWinnersTicker()
 end
 
@@ -172,12 +236,13 @@ local function create_leaderboard_page()
     leaderboard_page = shared.makeGuildPage()
     leaderboard_page:SetScript("OnShow", show_page)
 
-    local title = leaderboard_page:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", leaderboard_page, "TOPLEFT", 14, -12)
+    title = leaderboard_page:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetText("Tithe Leaderboard")
 
     week_label = leaderboard_page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     week_label:SetPoint("TOPRIGHT", leaderboard_page, "TOPRIGHT", -14, -16)
+
+    create_level_button()
 
     -- Stops above the ticker, which is shared.winners_ticker_height tall
     local scroll = CreateFrame("ScrollFrame", nil, leaderboard_page, "UIPanelScrollFrameTemplate")

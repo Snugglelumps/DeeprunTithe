@@ -8,9 +8,10 @@
 --       payments = { { time, copper }, ... },   oldest first
 --       total = copper,                         every payment added up
 --       lore_rank = 0,                          the highest lore shown so far
+--       failed_rolls = 0,                       rolls lost since the last ascent, nil until the first
 --   }
--- The rank is raised at payment, so a communique must never be dropped: if a memo or
--- notice is on screen when it's due, it waits 30 seconds and looks again.
+-- The rank is raised at payment, so a communique must never be dropped: if a memo,
+-- notice or the archive is on screen when it's due, it waits 30 seconds and looks again.
 --
 -- Each payment is two numbers, so even thousands of them are a few kilobytes,
 -- and the checks below only run once per payment.
@@ -33,6 +34,16 @@ local lore = {
     [[You have ascended to level 6 in your guild tithe payments. You’ll be happy to know that you are almost at level 7, where you no longer risk being ritualistically sacrificed to appease Jonathan Deeprun’s ever-growing thirst for blood! With only one more level, you’ll (most likely) be under the official protection of Jonathan Deeprun. Know that this is the most dangerous time for you. Running will not save you. Keep your head down, and you would do well to ascend again quickly.]],
     [[You have ascended to level 7 in your guild tithe payments. You have received Jonathan’s favor and protection. …From sacrifice in guild internal activities at least. We do occasionally call upon members to appease the dark ones that thrive in the plane between this and the next, keeping general exposure to their horrors to a minimum. We ask that you do not concern yourself with such matters, simply that you remain aware of their existence. Warning: This will make you a target going forward.]],
 }
+
+
+-- The archive retells these (Chrome/DeeprunArchive.lua)
+shared.lore = lore
+
+
+-- The highest lore this account has been shown. 0 before the first tithe.
+function shared.titheLevel()
+    return tithe_history and tithe_history.lore_rank or 0
+end
 
 
 -- What each rank needs before it can be rolled for. Rank 1 is the first payment, no roll.
@@ -62,8 +73,9 @@ local function day_number(time_stamp)
 end
 
 
--- The most days in a row with a tithe, counting only payments made at or after since
-local function longest_streak(since)
+-- The most days in a row with a tithe, counting only payments made at or after since.
+-- Then the streak still going: one that reached today or yesterday, or 0.
+local function streaks(since)
     local longest = 0
     local current = 0
     local last_day = nil
@@ -85,33 +97,43 @@ local function longest_streak(since)
         end
     end
 
-    return longest
+    if last_day == nil or day_number(GetServerTime()) - last_day > 1 then
+        current = 0
+    end
+
+    return longest, current
+end
+
+
+-- What this account has toward a rank, and what the rank needs. A need of 0 isn't asked for,
+-- and a rank with no requirements needs nothing. The gold is in copper.
+function shared.titheProgress(rank)
+    local needs = requirements[rank] or {}
+    local now = GetServerTime()
+    local since = needs.within and (now - needs.within * seconds_per_day) or 0
+    local longest, current = streaks(since)
+
+    return {
+        days = math.floor((now - tithe_history.payments[1][1]) / seconds_per_day),
+        days_needed = needs.days or 0,
+        gold = tithe_history.total,
+        gold_needed = (needs.gold or 0) * copper_per_gold,
+        streak = longest,
+        streak_needed = needs.streak or 0,
+        current_streak = current,
+        payments = #tithe_history.payments,
+        payments_needed = needs.payments or 0,
+    }
 end
 
 
 local function meets_requirements(rank)
-    local needs = requirements[rank]
-    if needs == nil then
-        return false
-    end
+    local progress = shared.titheProgress(rank)
 
-    local now = GetServerTime()
-    local first_payment = tithe_history.payments[1][1]
-
-    if now - first_payment < needs.days * seconds_per_day then
-        return false
-    end
-
-    if tithe_history.total < needs.gold * copper_per_gold then
-        return false
-    end
-
-    if needs.payments and #tithe_history.payments < needs.payments then
-        return false
-    end
-
-    local since = needs.within and (now - needs.within * seconds_per_day) or 0
-    return longest_streak(since) >= needs.streak
+    return progress.days >= progress.days_needed
+        and progress.gold >= progress.gold_needed
+        and progress.streak >= progress.streak_needed
+        and progress.payments >= progress.payments_needed
 end
 
 
@@ -133,7 +155,7 @@ end
 
 
 local function display_lore_when_clear(rank)
-    if shared.memo_showing or shared.notice_showing then
+    if shared.memo_showing or shared.notice_showing or shared.archive_showing then
         C_Timer.After(busy_retry_seconds, function()
             display_lore_when_clear(rank)
         end)
@@ -172,8 +194,18 @@ function shared.recordTitheHistory(copper)
     end
 
     -- The first payment always unlocks rank 1. After that, earn it, then win the roll.
-    if next_rank == 1 or (meets_requirements(next_rank) and math.random(next_rank) == 1) then
-        tithe_history.lore_rank = next_rank
-        show_lore(next_rank)
+    if next_rank > 1 then
+        if not meets_requirements(next_rank) then
+            return
+        end
+
+        if math.random(next_rank) ~= 1 then
+            tithe_history.failed_rolls = (tithe_history.failed_rolls or 0) + 1
+            return
+        end
     end
+
+    tithe_history.lore_rank = next_rank
+    tithe_history.failed_rolls = 0
+    show_lore(next_rank)
 end
