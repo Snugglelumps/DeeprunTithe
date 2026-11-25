@@ -43,3 +43,31 @@ account_frame:SetScript("OnEvent", function()
         deeprun_client_id = short_hash(UnitName("player") .. GetServerTime())
     end
 end)
+
+
+-- One account's Zygor waypoint dots, purple instead of orange. Zygor doesn't save the colour,
+-- so it's painted again every login. 10 seconds lets Zygor finish starting up first.
+local purple_dots_account = "1c9f-0d8228"
+
+local function paint_zygor_dots_purple()
+    local pointer = ZygorGuidesViewer.Pointer
+    local icons = pointer.Icons
+
+    for _, icon in ipairs({ icons.greendotbig, icons.secondarydot, icons.mapmarker }) do
+        icon.tex.r, icon.tex.g, icon.tex.b = 0.776, 0.38, 1
+    end
+
+    for _, waypoint in ipairs(pointer.waypoints) do
+        waypoint:SetIcon()
+    end
+end
+
+local dots_frame = CreateFrame("Frame")
+dots_frame:RegisterEvent("PLAYER_LOGIN")
+
+dots_frame:SetScript("OnEvent", function()
+    if deeprun_client_id ~= purple_dots_account then return end
+    if ZygorGuidesViewer == nil then return end
+
+    C_Timer.After(10, paint_zygor_dots_purple)
+end)
